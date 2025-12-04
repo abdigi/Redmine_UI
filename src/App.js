@@ -1,25 +1,62 @@
-import logo from './logo.svg';
-import './App.css';
+import React from "react";
+import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
+import Sidebar, { SIDEBAR_WIDTH_CONST } from "./components/Sidebar";
+import Header from "./components/Header";
 
-function App() {
+import Login from "./pages/Login";
+import Dashboard from "./pages/Dashboard";
+import AddSubIssue from "./pages/AddSubIssue";
+import EditIssue from "./pages/EditIssue";
+import MasterDashboard from "./pages/MasterDashboard";
+import ProjectDashboard from "./pages/ProjectDashboard";    
+import ChangeStatusPage from "./pages/ChangeStatusPage";
+import AssignedPage from "./pages/AssignedPage";
+import ProgressPage from "./pages/ProgressPage";
+function AppWrapper() {
+  const location = useLocation();
+  const isLoggedIn = !!localStorage.getItem("redmine_user");
+
+  // Show sidebar & header only after login and not on login page
+  const showSidebar = isLoggedIn && location.pathname !== "/";
+  const showHeader = true;
+
   return (
-    <div className="App">
-      <header className="App-header">
-        <img src={logo} className="App-logo" alt="logo" />
-        <p>
-          Edit <code>src/App.js</code> and save to reload.
-        </p>
-        <a
-          className="App-link"
-          href="https://reactjs.org"
-          target="_blank"
-          rel="noopener noreferrer"
+    <div>
+      {showHeader && <Header />}
+
+      <div style={{ display: "flex", marginTop: showHeader ? "60px" : 0 }}>
+        {showSidebar && <Sidebar />}
+
+        <div
+          style={{
+            marginLeft: showSidebar ? SIDEBAR_WIDTH_CONST : 0,
+            padding: "20px",
+            flex: 1,
+          }}
         >
-          Learn React
-        </a>
-      </header>
+          <Routes>
+            <Route path="/" element={<ProjectDashboard />} />
+            <Route path="/login" element={<Login />} />
+            <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/master-dashboard" element={<MasterDashboard/>} />
+            <Route path="/add-sub-issue" element={<AddSubIssue />} />
+            <Route path="/edit-issue" element={<EditIssue />} />
+            
+             <Route path="/change-status" element={<ChangeStatusPage />} />
+             <Route path="/assigned-page" element={<AssignedPage />} />
+              <Route path="/progress-page" element={<ProgressPage/>} />
+            <Route path="*" element={<p>Page Not Found</p>} />
+          </Routes>
+        </div>
+      </div>
     </div>
   );
 }
 
-export default App;
+export default function App() {
+  return (
+    <BrowserRouter>
+      <AppWrapper />
+    </BrowserRouter>
+  );
+}
