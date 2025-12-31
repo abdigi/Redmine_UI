@@ -1,101 +1,117 @@
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
+import "./Header.css";
 
 export default function Header() {
   const navigate = useNavigate();
   const location = useLocation();
+  const [user, setUser] = useState(null);
+  const [currentTime, setCurrentTime] = useState("");
 
   // Check if user is logged in
-  const isLoggedIn = !!localStorage.getItem("redmine_user");
+  useEffect(() => {
+    const userData = localStorage.getItem("redmine_user");
+    if (userData) {
+      try {
+        const parsedUser = JSON.parse(userData);
+        setUser(parsedUser);
+      } catch (error) {
+        console.error("Error parsing user data:", error);
+      }
+    }
 
-  const handleLogout = () => {
-    localStorage.removeItem("redmine_user");
-    navigate("/login"); // redirect to login page
+    // Update time every minute
+    const updateTime = () => {
+      const now = new Date();
+      const options = { 
+        weekday: 'long', 
+        year: 'numeric', 
+        month: 'long', 
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      };
+      setCurrentTime(now.toLocaleDateString('en-US', options));
+    };
+
+    updateTime();
+    const intervalId = setInterval(updateTime, 60000);
+
+    return () => clearInterval(intervalId);
+  }, []);
+
+  const getUserInitials = () => {
+    if (!user || !user.firstname || !user.lastname) return "U";
+    return `${user.firstname.charAt(0)}${user.lastname.charAt(0)}`.toUpperCase();
   };
 
-  const handleLogin = () => {
-    navigate("/login"); // redirect to login page
+  const getUserFullName = () => {
+    if (!user || !user.firstname || !user.lastname) return "User";
+    return `${user.firstname} ${user.lastname}`;
   };
 
-  const handleDashboard = () => {
-    navigate("/"); // redirect to dashboard
+  const getUserRole = () => {
+    if (!user || !user.memberships) return "Ministry Staff";
+    
+    const roles = new Set();
+    user.memberships.forEach((membership) => {
+      membership.roles.forEach((role) => roles.add(role.name));
+    });
+
+    const roleArray = Array.from(roles);
+    if (roleArray.length > 0) {
+      if (roleArray.includes("State Ministers")) return "State Minister";
+      if (roleArray.includes("Chief Executives")) return "Chief Executive";
+      if (roleArray.includes("Executives")) return "Executive";
+      if (roleArray.includes("Team Leaders")) return "Team Leader";
+      return roleArray[0];
+    }
+    
+    return "Ministry Staff";
   };
 
   return (
-    <div
-      style={{
-        height: "60px",
-        width: "100%",
-        background: "#fff",
-        color: "#2E7D32",
-        display: "flex",
-        justifyContent: "space-between",
-        alignItems: "center",
-        padding: "0 20px",
-        boxSizing: "border-box",
-        position: "fixed",
-        top: 0,
-        left: 0,
-        zIndex: 1000,
-        borderBottom: "1px solid #ccc",
-      }}
-    >
-      <h2 style={{ margin: 0, fontSize: "18px" }}>
-        Ministry of Agriculture Plan & Report Tracker
-      </h2>
+    <header className="header-container">
+      {/* Left Section: Logo and Title */}
+      <div className="header-left">
+        <div className="ministry-logo-static">
+          <span className="logo-icon">🌱</span>
+          <div className="logo-text">
+            <h1 className="ministry-title">Ministry of Agriculture</h1>
+            <p className="ministry-subtitle">Plan & Report Tracker</p>
+          </div>
+        </div>
+      </div>
 
-      {isLoggedIn ? (
-        <button
-          onClick={handleLogout}
-          style={{
-            background: "#fafafa",
-            color: "#2E7D32",
-            border: "1px solid #ccc",
-            padding: "4px 8px",
-            borderRadius: "3px",
-            fontSize: "12px",
-            cursor: "pointer",
-            width: "70px",
-            textAlign: "center",
-          }}
-        >
-          Logout
-        </button>
-      ) : location.pathname === "/login" ? (
-        <button
-          onClick={handleDashboard}
-          style={{
-            background: "#fafafa",
-            color: "#2E7D32",
-            border: "1px solid #ccc",
-            padding: "4px 8px",
-            borderRadius: "3px",
-            fontSize: "12px",
-            cursor: "pointer",
-            width: "90px",
-            textAlign: "center",
-          }}
-        >
-          Dashboard
-        </button>
-      ) : (
-        <button
-          onClick={handleLogin}
-          style={{
-            background: "#fafafa",
-            color: "#2E7D32",
-            border: "1px solid #ccc",
-            padding: "4px 8px",
-            borderRadius: "3px",
-            fontSize: "12px",
-            cursor: "pointer",
-            width: "70px",
-            textAlign: "center",
-          }}
-        >
-          Login
-        </button>
-      )}
-    </div>
+      {/* Center Section: Current Time and Page Indicator */}
+      <div className="header-center">
+        <div className="current-time">
+          <span className="time-icon">🕐</span>
+          <span className="time-text">{currentTime}</span>
+        </div>
+        {location.pathname !== "/" && location.pathname !== "/login" && (
+          <div className="page-indicator">
+            <span className="page-name">
+              {location.pathname.split('/').pop().replace(/-/g, ' ').toUpperCase()}
+            </span>
+          </div>
+        )}
+      </div>
+
+      {/* Right Section: User Info Only */}
+      <div className="header-right">
+        {user && (
+          <div className="user-info-static">
+            <div className="user-avatar-static">
+              <span className="avatar-initials">{getUserInitials()}</span>
+            </div>
+            <div className="user-details-static">
+              <span className="user-name-static">{getUserFullName()}</span>
+              <span className="user-role-static">{getUserRole()}</span>
+            </div>
+          </div>
+        )}
+      </div>
+    </header>
   );
 }

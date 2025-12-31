@@ -1,13 +1,31 @@
 import React, { useState, useEffect } from "react";
-import { getProjectMembers, getIssuesAssigned, getProjects } from "../api/redmineApi";
+import {
+  getProjects,
+  getCurrentUser,
+  getUsersInGroup,
+  getIssuesAssigned,
+} from "../api/redmineApi";
+
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer,
+  CartesianGrid,
+  LabelList,
+} from "recharts";
 
 export default function MasterDashboard() {
-  const [members, setMembers] = useState([]);
-  const [issues, setIssues] = useState([]);
-  const [selectedMemberId, setSelectedMemberId] = useState("");
   const [projects, setProjects] = useState([]);
+  const [currentUser, setCurrentUser] = useState(null);
+  const [myGroupUsers, setMyGroupUsers] = useState([]);
+  const [selectedMemberId, setSelectedMemberId] = useState("");
+  const [issues, setIssues] = useState([]);
+  const [selectedPeriod, setSelectedPeriod] = useState("Yearly");
 
-  // Load projects on mount
+  // Load projects (optional)
   useEffect(() => {
     async function loadProjects() {
       const data = await getProjects();
@@ -16,149 +34,229 @@ export default function MasterDashboard() {
     loadProjects();
   }, []);
 
-  // Load members (users + groups)
+  // Load current user
   useEffect(() => {
-    async function loadMembers() {
-      if (!projects.length) return;
-
-      let allMembers = [];
-
-      for (let project of projects) {
-        const projectMembers = await getProjectMembers(project.id);
-        allMembers = [...allMembers, ...projectMembers];
-      }
-
-      // Remove duplicates by ID + type (user/group)
-      const uniqueMembers = allMembers.filter(
-        (v, i, a) =>
-          a.findIndex((t) => t.id === v.id && t.isGroup === v.isGroup) === i
-      );
-
-      setMembers(uniqueMembers);
+    async function loadUser() {
+      const user = await getCurrentUser();
+      setCurrentUser(user);
     }
+    loadUser();
+  }, []);
 
-    loadMembers();
-  }, [projects]);
+  // Load all users in the group that matches current username
+  useEffect(() => {
+    async function loadGroupUsers() {
+      if (!currentUser) return;
+      const users = await getUsersInGroup(currentUser.login);
+      setMyGroupUsers(users || []);
+    }
+    loadGroupUsers();
+  }, [currentUser]);
 
-  // Load issues when selected member changes
+  // Load issues for selected member
   useEffect(() => {
     async function loadIssues() {
       if (!selectedMemberId) {
         setIssues([]);
         return;
       }
-
       const data = await getIssuesAssigned(selectedMemberId);
-      setIssues(data);
+      setIssues(data || []);
     }
-
     loadIssues();
   }, [selectedMemberId]);
 
-  // Split users and groups
-  const users = members.filter((m) => !m.isGroup);
-  const groups = members.filter((m) => m.isGroup);
+  // Map progress by period
+  const mapProgress = (done, period) => {
+    if (period === "Yearly") return done;
+    if (period === "6 Months") return done <= 50 ? Math.round((done / 50) * 100) : 100;
+    if (period === "9 Months") return done <= 75 ? Math.round((done / 75) * 100) : 100;
+
+    switch (period) {
+      case "1ኛ ሩብዓመት":
+        return done <= 25 ? Math.round((done / 25) * 100) : 100;
+      case "2ኛ ሩብዓመት":
+        return done >= 26 && done <= 50
+          ? Math.round(((done - 26) / 24) * 100)
+          : done > 50
+          ? 100
+          : 0;
+      case "3ኛ ሩብዓመት":
+        return done >= 51 && done <= 75
+          ? Math.round(((done - 51) / 24) * 100)
+          : done > 75
+          ? 100
+          : 0;
+      case "4ኛ ሩብዓመት":
+        return done >= 76 && done <= 100
+          ? Math.round(((done - 76) / 24) * 100)
+          : done === 100
+          ? 100
+          : 0;
+      default:
+        return 0;
+    }
+  };
+
+  // Filter issues by period
+  const filteredIssues = issues.filter((issue) => {
+    if (selectedPeriod === "Yearly") return true;
+
+    const getField = (q) => issue.custom_fields?.find((f) => f.name === q)?.value;
+
+    if (selectedPeriod === "6 Months") {
+      return getField("1ኛ ሩብዓመት") || getField("2ኛ ሩብዓመት");
+    }
+
+    if (selectedPeriod === "9 Months") {
+      return getField("1ኛ ሩብዓመት") || getField("2ኛ ሩብዓመት") || getField("3ኛ ሩብዓመት");
+    }
+
+    const val = getField(selectedPeriod);
+    return val && val !== "0" && val !== "";
+  });
+
+  // Weighted overall progress
+  const overallProgress = (() => {
+    let totalWeight = 0;
+    let weightedProgress = 0;
+
+    filteredIssues.forEach((issue) => {
+      const weight = Number(issue.custom_fields?.find((f) => f.name === "ክብደት")?.value) || 1;
+      const progress = mapProgress(issue.done_ratio, selectedPeriod);
+      totalWeight += weight;
+      weightedProgress += progress * weight;
+    });
+
+    return totalWeight > 0 ? Math.round(weightedProgress / totalWeight) : 0;
+  })();
+
+  // Chart data for individual issues
+  const chartData = filteredIssues.map((issue) => ({
+    name: issue.subject,
+    progress: mapProgress(issue.done_ratio, selectedPeriod),
+    status: issue.status?.name,
+  }));
 
   return (
     <div style={{ padding: "20px" }}>
       <h1>My Dashboard</h1>
 
-      {/* User + Group filter */}
+      {/* User Filter */}
       <div style={{ marginBottom: "20px" }}>
         <label>
-          Select User / Group:{" "}
+          Select User:{" "}
           <select
             value={selectedMemberId}
             onChange={(e) => setSelectedMemberId(e.target.value)}
             style={{ padding: "5px" }}
           >
-            <option value="">-- All Users / Groups --</option>
-
-            {users.length > 0 && (
-              <optgroup label="Users">
-                {users.map((user) => (
-                  <option key={`u-${user.id}`} value={user.id}>
-                    {user.name}
-                  </option>
-                ))}
-              </optgroup>
-            )}
-
-            {groups.length > 0 && (
-              <optgroup label="Groups">
-                {groups.map((group) => (
-                  <option key={`g-${group.id}`} value={group.id}>
-                    {group.name}
-                  </option>
-                ))}
-              </optgroup>
-            )}
+            <option value="">-- Select User --</option>
+            {myGroupUsers.map((user) => {
+              const displayName = user.firstname && user.lastname
+                ? `${user.firstname} ${user.lastname}`
+                : user.name || user.login || `User ${user.id}`;
+              return (
+                <option key={user.id} value={user.id}>
+                  {displayName}
+                </option>
+              );
+            })}
           </select>
         </label>
       </div>
 
-      {/* Total issues for selected member */}
+      {/* Period Filter */}
+      <div style={{ marginBottom: "20px" }}>
+        <label>
+          Select Period:{" "}
+          <select
+            value={selectedPeriod}
+            onChange={(e) => setSelectedPeriod(e.target.value)}
+          >
+            <option value="Yearly">Yearly</option>
+            <option>1ኛ ሩብዓመት</option>
+            <option>2ኛ ሩብዓመት</option>
+            <option>3ኛ ሩብዓመት</option>
+            <option>4ኛ ሩብዓመት</option>
+            <option value="6 Months">6 Months</option>
+            <option value="9 Months">9 Months</option>
+          </select>
+        </label>
+      </div>
+
+      {/* Weighted Overall Performance */}
       {selectedMemberId && (
-        <div style={{ marginBottom: "15px", fontWeight: "bold", fontSize: "16px" }}>
-          Total Issues: {issues.length}
+        <div style={{ marginBottom: "20px" }}>
+          <div style={{ fontWeight: "bold", fontSize: "16px", marginBottom: "10px" }}>
+            Total Issues: {issues.length} — Weighted Overall Performance: {overallProgress}%
+          </div>
+
+          <div
+            style={{
+              width: "100%",
+              backgroundColor: "#e0e0e0",
+              borderRadius: "8px",
+              overflow: "hidden",
+              height: "25px",
+            }}
+          >
+            <div
+              style={{
+                width: `${overallProgress}%`,
+                backgroundColor: "#4CAF50",
+                height: "100%",
+                textAlign: "center",
+                color: "#fff",
+                fontWeight: "bold",
+                lineHeight: "25px",
+              }}
+            >
+              {overallProgress}%
+            </div>
+          </div>
         </div>
       )}
 
-      {/* Issues display */}
-      <div style={{ display: "flex", flexWrap: "wrap", gap: "15px" }}>
-        {issues.map((issue) => (
-          <div
-            key={`${issue.project?.id}-${issue.id}`}
-            style={{
-              width: "250px",
-              minHeight: "160px",
-              border: "1px solid #ccc",
-              borderRadius: "6px",
-              padding: "10px",
-              background: "#f5f5f5",
-              display: "flex",
-              flexDirection: "column",
-              justifyContent: "space-between",
-            }}
+      {/* Per-Issue Chart */}
+      <div style={{ height: Math.max(300, filteredIssues.length * 55), marginBottom: "20px" }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart
+            data={chartData}
+            layout="vertical"
+            margin={{ top: 20, right: 40, left: 250, bottom: 20 }}
           >
-            {/* Top: title & description */}
-            <div>
-              <h4 style={{ margin: "0 0 10px 0" }}>{issue.subject}</h4>
-              <p>{issue.description?.slice(0, 50)}...</p>
-            </div>
-
-            {/* Bottom: status & progress */}
-            <div>
-              <p style={{ margin: "5px 0", fontWeight: "bold" }}>
-                Status: {issue.status?.name}
-              </p>
-
-              {/* Progress Bar */}
-              <div style={{ margin: "5px 0" }}>
-                <div
-                  style={{
-                    height: "12px",
-                    width: "100%",
-                    backgroundColor: "#ddd",
-                    borderRadius: "6px",
-                    overflow: "hidden",
-                  }}
-                >
-                  <div
-                    style={{
-                      height: "100%",
-                      width: `${issue.done_ratio}%`,
-                      backgroundColor:
-                        issue.done_ratio === 100 ? "#4caf50" : "#2196f3",
-                      transition: "width 0.3s ease-in-out",
-                    }}
-                  />
-                </div>
-                <small>{issue.done_ratio}% Complete</small>
-              </div>
-            </div>
-          </div>
-        ))}
+            <CartesianGrid strokeDasharray="3 3" />
+            <YAxis
+              type="category"
+              dataKey="name"
+              width={250}
+              tick={({ x, y, payload }) => {
+                const text = payload.value.length > 30 ? payload.value.slice(0, 27) + "..." : payload.value;
+                return (
+                  <text x={x} y={y + 5} textAnchor="end" fontSize={12} fontWeight="bold">
+                    {text}
+                  </text>
+                );
+              }}
+            />
+            <XAxis type="number" domain={[0, 100]} tickFormatter={(v) => v + "%"} />
+            <Tooltip
+              formatter={(value, name, props) => [
+                `${value}% — Status: ${props.payload.status}`,
+                "Progress",
+              ]}
+            />
+            <Bar dataKey="progress" fill="#4CAF50" barSize={25}>
+              <LabelList
+                dataKey="progress"
+                position="right"
+                formatter={(v) => `${v}%`}
+                style={{ fill: "#000", fontSize: 12, fontWeight: "bold" }}
+              />
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
       </div>
     </div>
   );

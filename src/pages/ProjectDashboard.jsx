@@ -8,24 +8,24 @@ import {
   Tooltip,
   ResponsiveContainer,
   CartesianGrid,
+  LabelList,
 } from "recharts";
 
 export default function ProjectDashboard() {
   const [projects, setProjects] = useState([]);
   const [selectedProjectId, setSelectedProjectId] = useState("");
   const [averageProgress, setAverageProgress] = useState(null);
+  const [subProjectsProgress, setSubProjectsProgress] = useState([]);
   const [issuesCache, setIssuesCache] = useState({});
-  const [mainTasks, setMainTasks] = useState([]);
+  const [selectedQuarter, setSelectedQuarter] = useState("Annual");
 
-  // Fetch main projects
+  // Fetch all projects
   useEffect(() => {
     async function loadProjects() {
       const data = await getProjects();
-      const mainProjects = data.filter((p) => !p.parent); // only main projects
-      setProjects(mainProjects);
+      setProjects(data);
 
-      // Set default project if exists
-      const defaultProject = mainProjects.find(
+      const defaultProject = data.find(
         (p) =>
           p.name ===
           "የ2018 ዓ.ም የኢንፎርሜሽን ኮሚኒኬሽን ቴክኖሎጅ ስራ አስፈፃሚ አመታዊ ዕቅድ"
@@ -35,41 +35,71 @@ export default function ProjectDashboard() {
     loadProjects();
   }, []);
 
-  // Fetch main tasks for selected project
+  // Map done_ratio to 0-100 based on quarter
+  function mapProgressToQuarter(done_ratio, quarter) {
+    if (quarter === "Annual") return done_ratio;
+    if (quarter === "1ኛ ሩብዓመት") return Math.min(Math.max(((done_ratio - 0) / 25) * 100, 0), 100);
+    if (quarter === "2ኛ ሩብዓመት") return Math.min(Math.max(((done_ratio - 26) / (50 - 26)) * 100, 0), 100);
+    if (quarter === "3ኛ ሩብዓመት") return Math.min(Math.max(((done_ratio - 51) / (75 - 51)) * 100, 0), 100);
+    if (quarter === "4ኛ ሩብዓመት") return Math.min(Math.max(((done_ratio - 76) / (100 - 76)) * 100, 0), 100);
+    return done_ratio;
+  }
+
+  // Calculate subprojects progress
   useEffect(() => {
     if (!selectedProjectId) return;
 
-    async function loadProjectData() {
-      let issues = issuesCache[selectedProjectId];
+    async function loadSubProjectsProgress() {
+      const subs = projects.filter(
+        (p) => p.parent && p.parent.id === Number(selectedProjectId)
+      );
 
-      if (!issues) {
-        issues = await getProjectIssues({
-          project_id: selectedProjectId,
-          include: "custom_fields",
-          status_id: "*",
+      const results = [];
+
+      for (const sub of subs) {
+        let issues = issuesCache[sub.id];
+        if (!issues) {
+          issues = await getProjectIssues({
+            project_id: sub.id,
+            include: "custom_fields",
+            status_id: "*",
+          });
+          setIssuesCache((prev) => ({ ...prev, [sub.id]: issues }));
+        }
+
+        const mainIssues = issues.filter((i) => !i.parent);
+
+        let totalWeight = 0;
+        let weightedSum = 0;
+        mainIssues.forEach((i) => {
+          const weightField = i.custom_fields?.find((f) => f.name === "ክብደት");
+          const weight = weightField?.value ? Number(weightField.value) : 1;
+          totalWeight += weight;
+
+          const mappedProgress = mapProgressToQuarter(i.done_ratio || 0, selectedQuarter);
+          weightedSum += mappedProgress * weight;
         });
-        setIssuesCache((prev) => ({ ...prev, [selectedProjectId]: issues }));
+
+        const avgProgress = totalWeight > 0 ? Math.round(weightedSum / totalWeight) : 0;
+
+        results.push({
+          id: sub.id,
+          name: sub.name,
+          progress: avgProgress,
+        });
       }
 
-      const main = issues.filter((i) => !i.parent); // main tasks only
-      setMainTasks(main);
+      setSubProjectsProgress(results);
 
-      // Weighted average
-      let totalWeight = 0;
-      let weightedSum = 0;
-      main.forEach((i) => {
-        const weightField = i.custom_fields?.find((f) => f.name === "ክብደት");
-        const weight = weightField?.value ? Number(weightField.value) : 1;
-        totalWeight += weight;
-        weightedSum += (i.done_ratio || 0) * weight;
-      });
-
-      const result = totalWeight > 0 ? Math.round(weightedSum / totalWeight) : 0;
-      setAverageProgress(result);
+      const overallAvg =
+        results.length > 0
+          ? Math.round(results.reduce((sum, p) => sum + p.progress, 0) / results.length)
+          : 0;
+      setAverageProgress(overallAvg);
     }
 
-    loadProjectData();
-  }, [selectedProjectId]);
+    loadSubProjectsProgress();
+  }, [selectedProjectId, projects, selectedQuarter, issuesCache]);
 
   if (projects.length === 0) return <div>Loading projects...</div>;
 
@@ -86,14 +116,32 @@ export default function ProjectDashboard() {
             onChange={(e) => setSelectedProjectId(e.target.value)}
             style={{ padding: "5px" }}
           >
-            <option value="">
-              የ2018 ዓ.ም የኢንፎርሜሽን ኮሚኒኬሽን ቴክኖሎጅ ስራ አስፈፃሚ አመታዊ ዕቅድ
-            </option>
-            {projects.map((project) => (
-              <option key={project.id} value={project.id}>
-                {project.name}
-              </option>
-            ))}
+            <option value="">-- Select Project --</option>
+            {projects
+              .filter((p) => !p.parent)
+              .map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.name}
+                </option>
+              ))}
+          </select>
+        </label>
+      </div>
+
+      {/* Quarter Dropdown */}
+      <div style={{ marginBottom: "20px" }}>
+        <label>
+          Select Quarter:{" "}
+          <select
+            value={selectedQuarter}
+            onChange={(e) => setSelectedQuarter(e.target.value)}
+            style={{ padding: "5px" }}
+          >
+            <option value="Annual">Annual</option>
+            <option value="1ኛ ሩብዓመት">1ኛ ሩብዓመት</option>
+            <option value="2ኛ ሩብዓመት">2ኛ ሩብዓመት</option>
+            <option value="3ኛ ሩብዓመት">3ኛ ሩብዓመት</option>
+            <option value="4ኛ ሩብዓመት">4ኛ ሩብዓመት</option>
           </select>
         </label>
       </div>
@@ -114,23 +162,25 @@ export default function ProjectDashboard() {
             {projects.find((p) => p.id === Number(selectedProjectId))?.name}
           </h3>
           <div>
-            <strong>Average Progress: </strong>
+            <strong>
+              {selectedQuarter === "Annual"
+                ? "Average Progress"
+                : `Average Progress (${selectedQuarter})`}
+              :{" "}
+            </strong>
             {averageProgress}%
           </div>
         </div>
       )}
 
-      {/* Horizontal Bar Chart of Main Tasks */}
-      {mainTasks.length > 0 && (
-        <div style={{ width: "100%", height: Math.max(400, mainTasks.length * 40) }}>
-          <h2>Main Tasks Progress</h2>
+      {/* Subproject Bar Chart */}
+      {subProjectsProgress.length > 0 && (
+        <div style={{ width: "100%", height: Math.max(400, subProjectsProgress.length * 60) }}>
+          <h2>Subprojects Progress (from Main Issues)</h2>
           <ResponsiveContainer width="100%" height="100%">
             <BarChart
               layout="vertical"
-              data={mainTasks.map((task) => ({
-                name: task.subject,
-                progress: task.done_ratio,
-              }))}
+              data={subProjectsProgress}
               margin={{ top: 50, right: 30, left: 200, bottom: 50 }}
             >
               <CartesianGrid strokeDasharray="3 3" />
@@ -152,8 +202,15 @@ export default function ProjectDashboard() {
                   );
                 }}
               />
-              <Tooltip />
-              <Bar dataKey="progress" fill="#2196f3" />
+              <Tooltip formatter={(value) => `${value}%`} />
+              <Bar dataKey="progress" fill="#2196f3" barSize={40}>
+                <LabelList
+                  dataKey="progress"
+                  position="insideRight"
+                  formatter={(value) => `${value}%`}
+                  style={{ fill: "#fff", fontSize: 14, fontWeight: "bold" }}
+                />
+              </Bar>
             </BarChart>
           </ResponsiveContainer>
         </div>

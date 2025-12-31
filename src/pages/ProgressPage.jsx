@@ -1,14 +1,25 @@
 import React, { useEffect, useState } from "react";
-import { getIssuesAssignedToMe, updateIssue } from "../api/redmineApi";
+import { getIssuesAssignedToMe, updateIssue, getCurrentUser } from "../api/redmineApi";
 
 export default function ProgressPage() {
   const [issues, setIssues] = useState([]);
+  const [currentUser, setCurrentUser] = useState(null);
   const today = new Date();
 
   useEffect(() => {
     async function load() {
+      const user = await getCurrentUser();
+      setCurrentUser(user);
+
       const data = await getIssuesAssignedToMe();
-      setIssues(data);
+
+      // Filter issues to only those assigned to current user's full name
+      const fullName = user.firstname && user.lastname ? `${user.firstname} ${user.lastname}` : user.login;
+      const filteredIssues = data.filter(
+        (issue) => issue.assigned_to && issue.assigned_to.name === fullName
+      );
+
+      setIssues(filteredIssues);
     }
     load();
   }, []);
@@ -89,6 +100,17 @@ export default function ProgressPage() {
     await updateIssue(issueId, { done_ratio: newValue });
   };
 
+  const mapToQuarterRange = (quarterName, value) => {
+    const [min, max] = getQuarterProgressRange(quarterName);
+    return Math.round(min + ((max - min) * value) / 100);
+  };
+
+  const mapFromQuarterRange = (quarterName, doneRatio) => {
+    const [min, max] = getQuarterProgressRange(quarterName);
+    if (max === min) return 0;
+    return Math.round(((doneRatio - min) / (max - min)) * 100);
+  };
+
   const tableStyle = {
     width: "100%",
     borderCollapse: "separate",
@@ -116,7 +138,12 @@ export default function ProgressPage() {
   };
 
   return (
-    <div style={{ padding: "30px", fontFamily: "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif" }}>
+    <div
+      style={{
+        padding: "30px",
+        fontFamily: "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif",
+      }}
+    >
       <h1 style={{ textAlign: "center", marginBottom: "25px", color: "#333" }}>
         Quarterly Progress
       </h1>
@@ -131,7 +158,8 @@ export default function ProgressPage() {
                   key={name}
                   style={{
                     ...thStyle,
-                    borderTopRightRadius: idx === customFieldNames.length - 1 ? "10px" : "0",
+                    borderTopRightRadius:
+                      idx === customFieldNames.length - 1 ? "10px" : "0",
                   }}
                 >
                   {name}
@@ -147,9 +175,12 @@ export default function ProgressPage() {
                   backgroundColor: idx % 2 === 0 ? "#f9f9f9" : "#fff",
                   ...trHoverStyle,
                 }}
-                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#e8f5e9")}
+                onMouseEnter={(e) =>
+                  (e.currentTarget.style.backgroundColor = "#e8f5e9")
+                }
                 onMouseLeave={(e) =>
-                  (e.currentTarget.style.backgroundColor = idx % 2 === 0 ? "#f9f9f9" : "#fff")
+                  (e.currentTarget.style.backgroundColor =
+                    idx % 2 === 0 ? "#f9f9f9" : "#fff")
                 }
               >
                 <td style={tdStyle}>{issue.subject}</td>
@@ -159,12 +190,10 @@ export default function ProgressPage() {
                   const editable =
                     name !== "የዓመቱ እቅድ" && val !== "" && val !== "0" && isQuarterActive(name);
 
-                  const [min, max] = getQuarterProgressRange(name);
-                  const options = getDropdownOptions(min, max);
-
                   return (
                     <td key={name} style={tdStyle}>
                       <div>{val}</div>
+
                       {editable ? (
                         <select
                           style={{
@@ -175,12 +204,16 @@ export default function ProgressPage() {
                             outline: "none",
                             cursor: "pointer",
                           }}
-                          value={issue.done_ratio || 0}
-                          onChange={(e) =>
-                            handleProgressChange(issue.id, Number(e.target.value))
-                          }
+                          value={mapFromQuarterRange(name, issue.done_ratio || 0)}
+                          onChange={(e) => {
+                            const newDoneRatio = mapToQuarterRange(
+                              name,
+                              Number(e.target.value)
+                            );
+                            handleProgressChange(issue.id, newDoneRatio);
+                          }}
                         >
-                          {options.map((p) => (
+                          {getDropdownOptions(0, 100).map((p) => (
                             <option key={p} value={p}>
                               {p}%
                             </option>

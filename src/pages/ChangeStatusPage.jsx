@@ -1,179 +1,232 @@
 import { useEffect, useState } from "react";
-import { 
-  getProjects, 
-  getProjectIssues, 
-  getIssue, 
-  updateIssue 
+import {
+  getProjects,
+  getProjectMembers,
+  getCurrentUser,
+  getGroupDetails,
+  getIssuesAssigned,
+  getIssue,
+  updateIssue
 } from "../api/redmineApi";
 
 export default function ChangeStatusPage() {
-  const [subtasks, setSubtasks] = useState([]);
+  const [projects, setProjects] = useState([]);
+  const [currentUser, setCurrentUser] = useState(null);
+  const [myGroup, setMyGroup] = useState(null);
+  const [myGroupUsers, setMyGroupUsers] = useState([]);
+  const [selectedUserId, setSelectedUserId] = useState("");
+  const [userIssues, setUserIssues] = useState([]);
   const [selectedStatusId, setSelectedStatusId] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  // 1️⃣ Load projects
   useEffect(() => {
-    const fetchData = async () => {
+    async function loadProjects() {
+      const data = await getProjects();
+      setProjects(data);
+    }
+    loadProjects();
+  }, []);
+
+  // 2️⃣ Load project members
+  const [members, setMembers] = useState([]);
+  useEffect(() => {
+    async function loadMembers() {
+      if (!projects.length) return;
+
+      let allMembers = [];
+      for (let project of projects) {
+        const projectMembers = await getProjectMembers(project.id);
+        allMembers = [...allMembers, ...projectMembers];
+      }
+
+      // Remove duplicates
+      const uniqueMembers = allMembers.filter(
+        (v, i, a) => a.findIndex(t => t.id === v.id) === i
+      );
+      setMembers(uniqueMembers);
+    }
+    loadMembers();
+  }, [projects]);
+
+  // 3️⃣ Load current user
+  useEffect(() => {
+    async function loadUser() {
+      const user = await getCurrentUser();
+      setCurrentUser(user);
+    }
+    loadUser();
+  }, []);
+
+  // 4️⃣ Find group with same name as username
+  useEffect(() => {
+    if (!currentUser || !members.length) return;
+
+    const group = members.find(
+      m => m.isGroup && m.name.toLowerCase() === currentUser.login.toLowerCase()
+    );
+    setMyGroup(group || null);
+  }, [currentUser, members]);
+
+  // 5️⃣ Load users inside that group
+  useEffect(() => {
+    async function loadGroupUsers() {
+      if (!myGroup) {
+        setMyGroupUsers([]);
+        return;
+      }
+      const g = await getGroupDetails(myGroup.id); // returns { group: { users: [] } }
+      setMyGroupUsers(g.users || []);
+    }
+    loadGroupUsers();
+  }, [myGroup]);
+
+  // 6️⃣ Load issues for selected user
+  useEffect(() => {
+    async function loadIssues() {
+      if (!selectedUserId) {
+        setUserIssues([]);
+        return;
+      }
+      setLoading(true);
       try {
-        const projects = await getProjects();
-        const projectIds = projects.map(p => p.id);
-
-        let allTasks = [];
-
-        // Load subtasks for all projects
-        for (const pid of projectIds) {
-          const issues = await getProjectIssues({ project_id: pid });
-          const subtasks = issues.filter(issue => issue.parent);
-
-          // Fetch full issue info for allowed statuses and current status
-          const enriched = await Promise.all(
-            subtasks.map(async st => {
-              const fullIssue = await getIssue(st.id); // must include allowed_statuses
-              return {
-                ...st,
-                allowed_statuses: fullIssue.allowed_statuses || [],
-                status: fullIssue.status, // <-- add current status
-              };
-            })
-          );
-
-          allTasks = [...allTasks, ...enriched];
-        }
-
-        // Deduplicate subtasks by ID
-        const uniqueTasks = Array.from(
-          new Map(allTasks.map(t => [t.id, t])).values()
+        const issues = await getIssuesAssigned(selectedUserId);
+        const enriched = await Promise.all(
+          issues.map(async (issue) => {
+            const full = await getIssue(issue.id);
+            return {
+              ...issue,
+              allowed_statuses: full.allowed_statuses || [],
+              status: full.status
+            };
+          })
         );
-
-        setSubtasks(uniqueTasks);
-      } catch (error) {
-        console.error("Failed to fetch subtasks:", error);
+        setUserIssues(enriched);
+      } catch (err) {
+        console.log(err);
       } finally {
         setLoading(false);
       }
-    };
+    }
+    loadIssues();
+  }, [selectedUserId]);
 
-    fetchData();
-  }, []);
+  // 7️⃣ Status filters
+  const availableStatuses = Array.from(
+    new Map(
+      userIssues
+        .flatMap(i => i.allowed_statuses)
+        .map(s => [s.id, s])
+    ).values()
+  );
 
+  const filteredUserIssues = selectedStatusId
+    ? userIssues.filter(i => i.status?.id === selectedStatusId)
+    : userIssues;
+
+  // 8️⃣ Handle status change
   const handleStatusChange = async (issueId, newStatusId) => {
-    const res = await updateIssue(issueId, { status_id: newStatusId });
-
-    if (res.success) {
-      setSubtasks(prev =>
-        prev.map(t =>
-          t.id === issueId
-            ? {
-                ...t,
-                status: t.allowed_statuses.find(s => s.id == newStatusId),
-              }
-            : t
-        )
-      );
-    } else {
+    try {
+      const res = await updateIssue(issueId, { status_id: newStatusId });
+      if (res.success) {
+        setUserIssues(prev =>
+          prev.map(i =>
+            i.id === issueId
+              ? { ...i, status: i.allowed_statuses.find(s => s.id == newStatusId) }
+              : i
+          )
+        );
+      } else {
+        alert("Failed to update status");
+      }
+    } catch (err) {
+      console.log(err);
       alert("Failed to update status");
     }
   };
 
-  // Build unique list of allowed statuses from subtasks
-  const allAllowedStatuses = Array.from(
-    new Map(subtasks.flatMap(s => s.allowed_statuses).map(st => [st.id, st])).values()
-  );
-
-  const subtasksByStatus = allAllowedStatuses.map(s => ({
-    ...s,
-    count: subtasks.filter(t => t.status?.id === s.id).length,
-    tasks: subtasks.filter(t => t.status?.id === s.id),
-  }));
-
-  if (loading) return <div style={{ padding: "20px" }}>Loading subtasks...</div>;
+  if (loading) return <div style={{ padding: 20 }}>Loading...</div>;
 
   return (
-    <div style={{ padding: "20px" }}>
-      <h2 style={{ fontSize: "20px", marginBottom: "15px" }}>
-        Change Subtask Status
-      </h2>
+    <div style={{ padding: 20 }}>
+      <h2>Change Subtask Status</h2>
 
-      {/* STATUS SELECT BOXES */}
-      <div style={{
-        display: "flex",
-        gap: "20px",
-        flexWrap: "wrap",
-        marginBottom: "20px",
-      }}>
-        {subtasksByStatus.map(s => (
-          <div
-            key={s.id}
-            onClick={() => setSelectedStatusId(s.id)}
-            style={{
-              cursor: "pointer",
-              padding: "20px",
-              background: selectedStatusId === s.id ? "#4caf50" : "#f0f0f0",
-              color: selectedStatusId === s.id ? "#fff" : "#333",
-              borderRadius: "12px",
-              minWidth: "150px",
-              textAlign: "center",
-              boxShadow: "0 4px 8px rgba(0,0,0,0.1)",
-              transition: "0.3s",
-              flex: "1 1 150px",
-            }}
-          >
-            <div style={{ fontWeight: "600", fontSize: "16px" }}>{s.name}</div>
-            <div style={{ fontSize: "14px", marginTop: "5px" }}>{s.count} tasks</div>
-          </div>
-        ))}
+      {/* USER FILTER */}
+      <div style={{ marginBottom: 20 }}>
+        <label style={{ marginRight: 10 }}>Filter by user:</label>
+        <select
+          value={selectedUserId}
+          onChange={(e) => setSelectedUserId(e.target.value)}
+          style={{ padding: "6px", borderRadius: 6 }}
+        >
+          <option value="">Select User</option>
+          {myGroupUsers.map(u => (
+            <option key={u.id} value={u.id}>
+              {u.firstname} {u.lastname}
+            </option>
+          ))}
+        </select>
       </div>
 
-      {/* SUBTASK LIST */}
-      {selectedStatusId && (
-        <div style={{ marginTop: "10px" }}>
-          <h3 style={{ marginBottom: "10px" }}>
-            Subtasks in "{allAllowedStatuses.find(s => s.id === selectedStatusId)?.name}"
-          </h3>
-
-          {subtasks
-            .filter(t => t.status?.id === selectedStatusId)
-            .map(task => (
+      {/* STATUS BOXES */}
+      {selectedUserId && (
+        <>
+          <div style={{ display: "flex", gap: 15, flexWrap: "wrap", marginBottom: 20 }}>
+            {availableStatuses.map(status => (
               <div
-                key={task.id}
+                key={status.id}
+                onClick={() => setSelectedStatusId(status.id)}
                 style={{
-                  marginBottom: "10px",
-                  padding: "10px",
-                  background: "#fff",
-                  borderRadius: "8px",
-                  boxShadow: "0 2px 6px rgba(0,0,0,0.1)",
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
+                  padding: 15,
+                  borderRadius: 10,
+                  cursor: "pointer",
+                  background: selectedStatusId === status.id ? "#4caf50" : "#eee",
+                  color: selectedStatusId === status.id ? "white" : "black"
                 }}
               >
+                <strong>{status.name}</strong>
                 <div>
-                  <strong>{task.subject}</strong>
-                  <div style={{ fontSize: "12px", color: "#666" }}>
-                    Project: {task.project?.name}
-                  </div>
-                </div>
-
-                <div>
-                  <select
-                    value={task.status.id}
-                    onChange={e => handleStatusChange(task.id, e.target.value)}
-                    style={{
-                      padding: "5px 8px",
-                      fontSize: "14px",
-                      borderRadius: "6px",
-                      border: "1px solid #ccc"
-                    }}
-                  >
-                    {task.allowed_statuses.map(s => (
-                      <option key={s.id} value={s.id}>
-                        {s.name}
-                      </option>
-                    ))}
-                  </select>
+                  {userIssues.filter(i => i.status?.id === status.id).length} tasks
                 </div>
               </div>
             ))}
-        </div>
+          </div>
+
+          {/* ISSUE LIST */}
+          {filteredUserIssues.map(issue => (
+            <div
+              key={issue.id}
+              style={{
+                padding: 12,
+                marginBottom: 8,
+                background: "#fff",
+                borderRadius: 8,
+                display: "flex",
+                justifyContent: "space-between",
+                boxShadow: "0 2px 4px rgba(0,0,0,0.1)"
+              }}
+            >
+              <div>
+                <strong>{issue.subject}</strong>
+                <div style={{ fontSize: 12, color: "#666" }}>
+                  Assigned to: {issue.assigned_to?.firstname} {issue.assigned_to?.lastname || "No one"}
+                </div>
+              </div>
+
+              <select
+                value={issue.status?.id || ""}
+                onChange={(e) =>
+                  handleStatusChange(issue.id, e.target.value)
+                }
+                style={{ padding: 6, borderRadius: 6 }}
+              >
+                {issue.allowed_statuses.map(s => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+            </div>
+          ))}
+        </>
       )}
     </div>
   );

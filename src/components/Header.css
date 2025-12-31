@@ -1,0 +1,529 @@
+/* Header.css */
+:root {
+  --primary-green: #2E7D32;
+  --primary-dark-green: #1B5E20;
+  --primary-light-green: #4CAF50;
+  --secondary-blue: #1976D2;
+  --text-dark: #333333;
+  --text-light: #666666;
+  --background-light: #f8f9fa;
+  --border-color: #e0e0e0;
+  --shadow-light: 0 2px 10px rgba(0, 0, 0, 0.1);
+  --shadow-medium: 0 4px 20px rgba(0, 0, 0, 0.15);
+  --transition-fast: 0.2s ease;
+  --transition-normal: 0.3s ease;
+}
+
+.header-container {
+  height: 70px;
+  width: 100%;
+  background: linear-gradient(135deg, 
+    rgba(255, 255, 255, 0.98) 0%,
+    rgba(255, 255, 255, 0.95) 100%);
+  backdrop-filter: blur(10px);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 30px;
+  box-sizing: border-box;
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 1000;
+  border-bottom: 1px solid rgba(46, 125, 50, 0.2);
+  box-shadow: var(--shadow-light);
+  transition: all var(--transition-normal);
+}
+
+.header-left,
+.header-center,
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+/* Logo Section */
+.ministry-logo {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  cursor: pointer;
+  transition: transform var(--transition-fast);
+}
+
+.ministry-logo:hover {
+  transform: translateX(-2px);
+}
+
+.logo-icon {
+  font-size: 36px;
+  animation: gentleFloat 4s ease-in-out infinite;
+}
+
+@keyframes gentleFloat {
+  0%, 100% {
+    transform: translateY(0) rotate(0);
+  }
+  50% {
+    transform: translateY(-3px) rotate(5deg);
+  }
+}
+
+.logo-text {
+  display: flex;
+  flex-direction: column;
+}
+
+.ministry-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--primary-dark-green);
+  background: linear-gradient(135deg, var(--primary-dark-green), var(--primary-green));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  letter-spacing: 0.3px;
+}
+
+.ministry-subtitle {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-light);
+  letter-spacing: 0.5px;
+}
+
+/* Center Section */
+.header-center {
+  flex: 1;
+  justify-content: center;
+}
+
+.current-time {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  background: linear-gradient(135deg, 
+    rgba(233, 245, 233, 0.8) 0%,
+    rgba(232, 245, 233, 0.9) 100%);
+  border-radius: 12px;
+  border: 1px solid rgba(76, 175, 80, 0.2);
+  box-shadow: 0 2px 8px rgba(46, 125, 50, 0.1);
+  transition: all var(--transition-normal);
+}
+
+.current-time:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(46, 125, 50, 0.2);
+}
+
+.time-icon {
+  font-size: 16px;
+  color: var(--primary-green);
+}
+
+.time-text {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--primary-dark-green);
+  white-space: nowrap;
+}
+
+.page-indicator {
+  background: linear-gradient(135deg, var(--primary-green), var(--primary-light-green));
+  padding: 6px 18px;
+  border-radius: 20px;
+  box-shadow: 0 3px 10px rgba(46, 125, 50, 0.3);
+  animation: slideIn 0.5s ease-out;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.page-name {
+  color: white;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: capitalize;
+}
+
+/* User Information (Static - Non-clickable) */
+.user-info-static {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  padding: 8px 16px;
+  border-radius: 16px;
+  background: rgba(248, 249, 250, 0.8);
+  border: 1px solid rgba(224, 224, 224, 0.5);
+  transition: all var(--transition-normal);
+}
+
+.user-info-static:hover {
+  background: rgba(233, 245, 233, 0.9);
+  border-color: rgba(76, 175, 80, 0.3);
+  box-shadow: var(--shadow-light);
+}
+
+.user-avatar-static {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--primary-green), var(--primary-light-green));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 3px 10px rgba(46, 125, 50, 0.3);
+  animation: gentlePulse 4s ease-in-out infinite;
+}
+
+@keyframes gentlePulse {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+}
+
+.avatar-initials {
+  color: white;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.user-details-static {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.user-name-static {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-dark);
+  white-space: nowrap;
+}
+
+.user-role-static {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--primary-green);
+  background: rgba(76, 175, 80, 0.1);
+  padding: 2px 8px;
+  border-radius: 10px;
+  display: inline-block;
+  animation: rolePulse 3s ease-in-out infinite;
+}
+
+@keyframes rolePulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.8;
+  }
+}
+
+/* Header Buttons */
+.header-button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 22px;
+  border: none;
+  border-radius: 12px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-normal);
+  position: relative;
+  overflow: hidden;
+}
+
+.header-button::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, 
+    transparent, 
+    rgba(255, 255, 255, 0.3), 
+    transparent);
+  transition: left 0.6s;
+}
+
+.header-button:hover::before {
+  left: 100%;
+}
+
+.header-button.login-btn {
+  background: linear-gradient(135deg, var(--primary-green), var(--primary-light-green));
+  color: white;
+  box-shadow: 0 4px 15px rgba(46, 125, 50, 0.3);
+}
+
+.header-button.login-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(46, 125, 50, 0.4);
+}
+
+.header-button.logout-btn {
+  background: linear-gradient(135deg, #d32f2f, #f44336);
+  color: white;
+  box-shadow: 0 4px 15px rgba(211, 47, 47, 0.3);
+}
+
+.header-button.logout-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(211, 47, 47, 0.4);
+}
+
+.button-icon {
+  font-size: 16px;
+}
+
+.button-text {
+  white-space: nowrap;
+}
+
+/* Responsive Design */
+@media (max-width: 1024px) {
+  .header-container {
+    padding: 0 20px;
+  }
+  
+  .header-center {
+    display: none;
+  }
+}
+
+@media (max-width: 768px) {
+  .header-container {
+    height: 60px;
+    padding: 0 15px;
+  }
+  
+  .ministry-title {
+    font-size: 16px;
+  }
+  
+  .ministry-subtitle {
+    font-size: 12px;
+  }
+  
+  .logo-icon {
+    font-size: 28px;
+  }
+  
+  .user-info-static {
+    padding: 6px 12px;
+    gap: 10px;
+  }
+  
+  .user-avatar-static {
+    width: 36px;
+    height: 36px;
+  }
+  
+  .avatar-initials {
+    font-size: 14px;
+  }
+  
+  .user-name-static {
+    font-size: 14px;
+  }
+  
+  .user-role-static {
+    font-size: 11px;
+  }
+  
+  .header-button {
+    padding: 8px 16px;
+    font-size: 14px;
+  }
+}
+
+@media (max-width: 480px) {
+  .ministry-title {
+    font-size: 14px;
+  }
+  
+  .ministry-subtitle {
+    display: none;
+  }
+  
+  .user-name-static {
+    font-size: 13px;
+  }
+  
+  .user-role-static {
+    display: none;
+  }
+  
+  .header-button .button-text {
+    display: none;
+  }
+  
+  .header-button {
+    padding: 10px;
+    min-width: 50px;
+    justify-content: center;
+  }
+  
+  .button-icon {
+    margin: 0;
+  }
+}
+
+/* Dark Mode Support */
+@media (prefers-color-scheme: dark) {
+  .header-container {
+    background: linear-gradient(135deg, 
+      rgba(30, 30, 30, 0.98) 0%,
+      rgba(25, 25, 25, 0.95) 100%);
+    border-bottom: 1px solid rgba(76, 175, 80, 0.2);
+  }
+  
+  .ministry-title {
+    background: linear-gradient(135deg, #81c784, #4caf50);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  
+  .ministry-subtitle {
+    color: #bbb;
+  }
+  
+  .current-time {
+    background: linear-gradient(135deg, 
+      rgba(30, 40, 30, 0.8) 0%,
+      rgba(25, 35, 25, 0.9) 100%);
+    border-color: rgba(76, 175, 80, 0.3);
+  }
+  
+  .time-text {
+    color: #81c784;
+  }
+  
+  .user-info-static {
+    background: rgba(40, 40, 40, 0.8);
+    border-color: rgba(76, 175, 80, 0.2);
+  }
+  
+  .user-info-static:hover {
+    background: rgba(50, 60, 50, 0.9);
+  }
+  
+  .user-name-static {
+    color: #f0f0f0;
+  }
+  
+  .user-role-static {
+    color: #81c784;
+    background: rgba(76, 175, 80, 0.15);
+  }
+}
+
+/* Accessibility */
+.header-button:focus-visible {
+  outline: 2px solid var(--primary-green);
+  outline-offset: 2px;
+}
+/* Add these styles to Header.css */
+
+/* App container styles */
+.app-container {
+  position: relative;
+  min-height: 100vh;
+  background: #f5f7fa;
+}
+
+.main-content-wrapper {
+  display: flex;
+  position: relative;
+}
+
+.main-content {
+  flex: 1;
+  transition: margin-left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  min-height: calc(100vh - 70px);
+  background: #f5f7fa;
+}
+
+.content-container {
+  padding: 20px;
+  max-width: 1400px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+/* Update ministry logo to be non-clickable */
+.ministry-logo-static {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  /* Removed cursor: pointer */
+  /* Removed transition */
+}
+
+.ministry-logo-static:hover {
+  /* Removed transform */
+  transform: none;
+}
+
+/* Ensure header is above sidebar */
+.header-container {
+  z-index: 1100 !important; /* Higher than sidebar's 1000 */
+}
+
+/* Ensure sidebar positioning */
+.sidebar-container {
+  z-index: 1000;
+  position: fixed;
+  top: 70px; /* Start below header */
+  left: 0;
+  height: calc(100vh - 70px);
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .main-content {
+    padding-top: 60px; /* Adjusted for smaller header */
+  }
+  
+  .content-container {
+    padding: 15px;
+  }
+  
+  .sidebar-container {
+    top: 60px;
+    height: calc(100vh - 60px);
+  }
+}
+
+/* Fix for when sidebar is collapsed */
+.sidebar-container[style*="width: 80px"] + .main-content {
+  margin-left: 80px;
+}
+
+/* Ensure proper layout on login page */
+body:has(.login-container) .main-content {
+  margin-left: 0 !important;
+  padding-top: 0 !important;
+}
