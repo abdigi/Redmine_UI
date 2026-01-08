@@ -908,7 +908,7 @@ export default function LeadExecutiveDashboard() {
             filteredTeamData.map((group) => (
               <Section
                 key={group.name}
-                title={`Team: ${group.name} (${group.users.length} Leader)`}
+                title={`Team: ${group.name}`}
                 isExpanded={true}
                 onToggle={() => {}}
               >

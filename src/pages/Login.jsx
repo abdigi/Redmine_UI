@@ -83,8 +83,10 @@ export default function Login() {
       <div className="login-form-box">
         <div className="login-header">
           <div className="ministry-logo">
-            <span className="logo-icon">🌱</span>
-            <h1>Ministry of Agriculture</h1>
+           
+  <div className="logo-image"></div>
+  <h1>Ministry of Agriculture</h1>
+
           </div>
           <h2>Plan & Report Tracker</h2>
         </div>

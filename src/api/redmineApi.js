@@ -5,12 +5,12 @@ const API = ""; // Your Redmine base URL here
 // =========================
 // CONFIGURATION
 // =========================
-const REDMINE_API_KEY = "56c1c6a2fc71e499ab4ad5f43d3687cac66bd54b";
+
 
 const apiClient = axios.create({
   baseURL: API,
   headers: {
-    "X-Redmine-API-Key": REDMINE_API_KEY,
+    "X-Redmine-API-Key": getApiKey(),
     "Content-Type": "application/json",
   },
 });
@@ -20,7 +20,7 @@ const apiClient = axios.create({
 // =========================
 function getApiKey() {
   const user = JSON.parse(localStorage.getItem("redmine_user"));
-  return user?.api_key || REDMINE_API_KEY;
+  return user?.api_key ;
 }
 
 // =========================
@@ -50,7 +50,17 @@ export async function getProjects() {
 
   try {
     while (true) {
-      const res = await apiClient.get(`/projects.json?limit=${limit}&offset=${offset}`);
+      const res = await axios.get(`${API}/projects.json`, {
+        headers: {
+          "X-Redmine-API-Key": getApiKey(),
+          "Content-Type": "application/json",
+        },
+        params: {
+          limit,
+          offset,
+        },
+      });
+
       const { projects, total_count } = res.data;
 
       allProjects = [...allProjects, ...projects];
@@ -62,7 +72,7 @@ export async function getProjects() {
 
     return allProjects;
   } catch (err) {
-    console.log("getProjects error:", err);
+    console.error("getProjects error:", err);
     return [];
   }
 }
@@ -248,7 +258,7 @@ export async function getIssuesAssigned(userId) {
     console.log("getIssuesAssigned error:", err);
     return [];
   }
-}
+} 
 // Get issues in a specific project (paginated)
 export async function getProjectIssues(params = {}) {
   let allIssues = [];
@@ -258,7 +268,13 @@ export async function getProjectIssues(params = {}) {
   try {
     while (true) {
       const queryParams = { ...params, status_id: "*", limit, offset };
-      const res = await apiClient.get("/issues.json", { params: queryParams });
+      const res = await axios.get(`${API}/issues.json`, {
+        headers: {
+          "X-Redmine-API-Key": getApiKey(),
+          "Content-Type": "application/json",
+        },
+        params: queryParams,
+      });
 
       const { issues, total_count } = res.data;
 
@@ -271,11 +287,10 @@ export async function getProjectIssues(params = {}) {
 
     return allIssues;
   } catch (err) {
-    console.log("getProjectIssues error:", err);
+    console.error("getProjectIssues error:", err);
     return [];
   }
 }
-
 // Get single issue (with allowed statuses)
 // Get single issue (with allowed statuses)
 export async function getIssue(issueId) {
@@ -409,11 +424,18 @@ export async function getMyMainProjects() {
     const apiKey = getApiKey();
     if (!apiKey) return [];
 
-    // Get current user
-    const userRes = await axios.get(`${API}/users/current.json?include=memberships&key=${apiKey}`);
+    // Get current user with memberships
+    const userRes = await axios.get(`${API}/users/current.json`, {
+      headers: {
+        "X-Redmine-API-Key": apiKey,
+        "Content-Type": "application/json",
+      },
+      params: { include: "memberships" },
+    });
+
     const memberships = userRes.data.user.memberships || [];
 
-    // Filter only main projects where user is a member
+    // Filter only main projects where user is a member (projects without parent)
     const mainProjectsMap = {};
     memberships.forEach((m) => {
       if (m.project && !m.project.parent) {
@@ -423,7 +445,7 @@ export async function getMyMainProjects() {
 
     return Object.values(mainProjectsMap);
   } catch (err) {
-    console.log("getMyMainProjects error:", err);
+    console.error("getMyMainProjects error:", err);
     return [];
   }
 }
@@ -443,6 +465,7 @@ export async function getProjectsByGroupUsers(groupUsers) {
 
   return Object.values(projectsMap);
 }
+
 // Get subprojects of a main project
 // Get subprojects of a main project (fallback if /projects/:id/projects.json not available)
 export async function getSubprojects(mainProjectId) {
@@ -703,24 +726,7 @@ export async function getIssuesByProject(projectId) {
     return [];
   }
 }
-async function getTeamWatchedIssues(users) {
-  let allIssues = [];
 
-  for (const user of users) {
-    const issues = await getWatchedOneLevelIssues(user.id); // pass userId
-    allIssues = allIssues.concat(issues);
-  }
-
-  // Remove duplicates (some issues may be watched by multiple users)
-  const uniqueIssues = Object.values(
-    allIssues.reduce((acc, issue) => {
-      acc[issue.id] = issue;
-      return acc;
-    }, {})
-  );
-
-  return uniqueIssues;
-}
 /**
  * Fetch watched issues for a user (or current user if no ID provided)
  * Only returns issues that have a parent, but the parent has no parent (one level deep)
@@ -818,6 +824,40 @@ export async function getExpertsForTeamUser(username) {
     return groupUsers;
   } catch (err) {
     console.error(`Error fetching experts for username: ${username}`, err);
+    return [];
+  }
+}
+// Add this function to redmineApi.js
+export async function getIssuesCreatedByUser(userId) {
+  let allIssues = [];
+  let offset = 0;
+  const limit = 100;
+
+  try {
+    while (true) {
+      const res = await axios.get(`${API}/issues.json`, {
+        headers: {
+          "X-Redmine-API-Key": getApiKey(),
+          "Content-Type": "application/json",
+        },
+        params: {
+          author_id: userId,
+          status_id: "*",
+          limit,
+          offset,
+        },
+      });
+
+      const { issues, total_count } = res.data;
+      allIssues = [...allIssues, ...issues];
+
+      if (allIssues.length >= total_count) break;
+      offset += limit;
+    }
+
+    return allIssues;
+  } catch (err) {
+    console.error("getIssuesCreatedByUser error:", err);
     return [];
   }
 }

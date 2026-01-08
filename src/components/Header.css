@@ -527,3 +527,12 @@ body:has(.login-container) .main-content {
   margin-left: 0 !important;
   padding-top: 0 !important;
 }
+.logo-image {
+  background-image: url('../assets/images/moalogo.png');
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+  width: 60px;
+  height: 60px;
+  margin-right: 15px;
+}

@@ -1174,3 +1174,439 @@
     grid-template-columns: repeat(3, 1fr);
   }
 }
+/* ዋና ተግባራት Analysis Table Styles */
+.analysis-table-section {
+  margin-top: 40px;
+  padding-top: 20px;
+  border-top: 2px solid #eee;
+}
+
+.analysis-table-container {
+  background: white;
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  margin-bottom: 20px;
+}
+
+.analysis-table-container h3 {
+  color: #333;
+  margin-bottom: 20px;
+  font-size: 1.4rem;
+  border-bottom: 2px solid #1976d2;
+  padding-bottom: 10px;
+}
+
+.analysis-table-wrapper {
+  overflow-x: auto;
+  border-radius: 8px;
+  border: 1px solid #dee2e6;
+}
+
+.analysis-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 1200px;
+}
+
+.analysis-table th {
+  background: #f8f9fa;
+  padding: 14px 12px;
+  text-align: left;
+  font-weight: 600;
+  color: #333;
+  border-bottom: 2px solid #dee2e6;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  white-space: nowrap;
+}
+
+.analysis-table .table-subtitle {
+  font-size: 0.75rem;
+  font-weight: normal;
+  color: #666;
+  margin-top: 4px;
+}
+
+.analysis-table td {
+  padding: 12px;
+  border-bottom: 1px solid #dee2e6;
+  vertical-align: middle;
+}
+
+.analysis-table tbody tr {
+  transition: background-color 0.2s ease;
+}
+
+.analysis-table tbody tr:hover {
+  background-color: #f5f5f5;
+}
+
+.analysis-table tbody tr:nth-child(even) {
+  background-color: #f8f9fa;
+}
+
+.analysis-table tbody tr:nth-child(even):hover {
+  background-color: #f0f0f0;
+}
+
+/* Column specific styles */
+.subject-cell {
+  max-width: 300px;
+  min-width: 250px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.target-cell {
+  font-weight: 600;
+  color: #2e7d32;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.actual-cell {
+  font-weight: 600;
+  color: #1565c0;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.weight-cell {
+  text-align: center;
+  font-weight: 600;
+  color: #6a1b9a;
+}
+
+.assigned-cell {
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Achievement badge */
+.achievement-badge {
+  display: inline-block;
+  padding: 6px 12px;
+  border-radius: 20px;
+  color: white;
+  font-weight: 600;
+  text-align: center;
+  min-width: 70px;
+  font-size: 0.9rem;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+/* Table footer */
+.table-footer {
+  background: #e3f2fd;
+  font-weight: 600;
+}
+
+.footer-label {
+  text-align: right;
+  padding-right: 20px !important;
+}
+
+.footer-value {
+  text-align: right;
+  color: #2e7d32;
+}
+
+.footer-value.actual {
+  color: #1565c0;
+}
+
+.footer-count {
+  text-align: center;
+  color: #333;
+}
+
+/* Table notes */
+.table-notes {
+  margin-top: 15px;
+  padding: 12px;
+  background: #f8f9fa;
+  border-radius: 6px;
+  border-left: 4px solid #1976d2;
+  font-size: 0.85rem;
+  color: #666;
+}
+
+.table-notes p {
+  margin: 5px 0;
+}
+
+/* Goal View Tabs */
+.goal-view-tabs {
+  display: flex;
+  margin-bottom: 25px;
+  border-bottom: 2px solid #dee2e6;
+}
+
+.goal-tab {
+  padding: 12px 24px;
+  background: none;
+  border: none;
+  font-size: 1rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #666;
+  border-bottom: 3px solid transparent;
+  transition: all 0.3s ease;
+  font-weight: 500;
+}
+
+.goal-tab:hover {
+  color: #1976d2;
+  background-color: #f5f5f5;
+}
+
+.goal-tab.active {
+  color: #1976d2;
+  border-bottom-color: #1976d2;
+  font-weight: 600;
+}
+
+/* No data message */
+.no-data-message {
+  text-align: center;
+  padding: 40px;
+  background: #f8f9fa;
+  border-radius: 8px;
+  color: #666;
+  border: 2px dashed #ddd;
+}
+
+.no-data-message .hint {
+  font-size: 0.9rem;
+  color: #888;
+  margin-top: 10px;
+  max-width: 500px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* Responsive adjustments */
+@media (max-width: 1200px) {
+  .analysis-table {
+    font-size: 0.9rem;
+  }
+  
+  .analysis-table th,
+  .analysis-table td {
+    padding: 10px 8px;
+  }
+  
+  .subject-cell {
+    max-width: 200px;
+    min-width: 150px;
+  }
+}
+
+@media (max-width: 768px) {
+  .goal-view-tabs {
+    flex-direction: column;
+  }
+  
+  .goal-tab {
+    justify-content: center;
+    border-bottom: none;
+    border-left: 3px solid transparent;
+  }
+  
+  .goal-tab.active {
+    border-bottom: none;
+    border-left-color: #1976d2;
+  }
+}
+/* Parent/Child row styling */
+.parent-row {
+  background-color: #f8f9fa !important;
+  border-top: 2px solid #dee2e6 !important;
+}
+
+.child-row {
+  background-color: white !important;
+}
+
+.level-cell {
+  font-size: 0.8em;
+  text-align: center;
+}
+
+.parent-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #1976d2;
+  font-weight: bold;
+}
+
+.child-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #6c757d;
+  margin-left: 8px;
+}
+
+.level-summary {
+  font-size: 0.8em;
+  color: #6c757d;
+  margin-top: 2px;
+}
+
+.level-note {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+  font-size: 0.9em;
+  color: #6c757d;
+}
+
+/* Issue Tooltip enhancement */
+.custom-tooltip .tooltip-level {
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 0.8em;
+  display: inline-block;
+  margin-top: 4px;
+}
+
+.tooltip-level-parent {
+  background-color: #e3f2fd;
+  color: #1976d2;
+}
+
+.tooltip-level-child {
+  background-color: #f5f5f5;
+  color: #6c757d;
+}
+
+/* Period Info Banner */
+.period-info-banner {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  padding: 12px 20px;
+  border-radius: 8px;
+  margin: 15px 0;
+}
+
+.period-info-content {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.issue-level-info {
+  font-size: 0.9em;
+  opacity: 0.9;
+}
+
+.level-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Analysis table styling */
+.analysis-table-wrapper {
+  overflow-x: auto;
+  margin-top: 20px;
+  border-radius: 8px;
+  border: 1px solid #dee2e6;
+}
+
+.analysis-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9em;
+}
+
+.analysis-table th {
+  background-color: #f8f9fa;
+  padding: 12px;
+  text-align: left;
+  font-weight: 600;
+  border-bottom: 2px solid #dee2e6;
+  position: sticky;
+  top: 0;
+}
+
+.analysis-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid #dee2e6;
+}
+
+.analysis-table tr:hover {
+  background-color: #f5f5f5;
+}
+
+.table-subtitle {
+  font-size: 0.8em;
+  color: #6c757d;
+  font-weight: normal;
+  margin-top: 4px;
+}
+
+.achievement-badge {
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 4px;
+  color: white;
+  font-weight: bold;
+  text-align: center;
+  min-width: 60px;
+}
+
+.table-notes {
+  margin-top: 15px;
+  padding: 10px;
+  background-color: #f8f9fa;
+  border-radius: 6px;
+  font-size: 0.85em;
+  color: #6c757d;
+}
+
+.table-notes p {
+  margin: 5px 0;
+}
+
+.table-footer {
+  background-color: #e9ecef;
+  font-weight: bold;
+}
+
+.footer-value.actual {
+  color: #2e7d32;
+  font-weight: bold;
+}
+
+.footer-count {
+  text-align: right;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .analysis-table th,
+  .analysis-table td {
+    padding: 8px 6px;
+    font-size: 0.85em;
+  }
+  
+  .level-cell {
+    font-size: 0.7em;
+  }
+  
+  .parent-indicator,
+  .child-indicator {
+    font-size: 0.9em;
+  }
+}

@@ -75,7 +75,7 @@ export default function Header() {
       {/* Left Section: Logo and Title */}
       <div className="header-left">
         <div className="ministry-logo-static">
-          <span className="logo-icon">🌱</span>
+          <div className="logo-image"></div>
           <div className="logo-text">
             <h1 className="ministry-title">Ministry of Agriculture</h1>
             <p className="ministry-subtitle">Plan & Report Tracker</p>
@@ -89,13 +89,7 @@ export default function Header() {
           <span className="time-icon">🕐</span>
           <span className="time-text">{currentTime}</span>
         </div>
-        {location.pathname !== "/" && location.pathname !== "/login" && (
-          <div className="page-indicator">
-            <span className="page-name">
-              {location.pathname.split('/').pop().replace(/-/g, ' ').toUpperCase()}
-            </span>
-          </div>
-        )}
+     
       </div>
 
       {/* Right Section: User Info Only */}

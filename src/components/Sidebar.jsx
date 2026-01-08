@@ -115,26 +115,26 @@ export default function Sidebar() {
 
   if (role === "Team Leaders") {
     menuItems = [
-      { name: "Dashboard", path: "/master-dashboard", icon: Icons.Dashboard },
-      { name: "Change Status", path: "/change-status", icon: Icons.Status },
-      { name: "Assign Subtask", path: "/assigned-page", icon: Icons.Task },
+      { name: "Dashboard", path: "/teamleader-dashboard", icon: Icons.Dashboard },
+      { name: "Personal Plan Management", path: "/personal-plan-management", icon: Icons.Task },
+      
     ];
   } else if (role === "Executives") {
     menuItems = [
       { name: "Dashboard", path: "/master-dashboard", icon: Icons.Dashboard },
-      { name: "Change Status", path: "/change-status", icon: Icons.Status },
+      
     ];
   } else if (role === "Chief Executives" || role === "State Ministers") {
     menuItems = [
       { name: "Dashboard", path: "/state-minister-dashboard", icon: Icons.Dashboard },
-      { name: "Change Status", path: "/change-status", icon: Icons.Status },
+      
     ];
   } else {
     // default for other roles
     menuItems = [
       { name: "Dashboard", path: "/dashboard", icon: Icons.Dashboard },
-      { name: "Add Subtask", path: "/add-sub-issue", icon: Icons.Task },
-      { name: "Edit Issue", path: "/edit-issue", icon: Icons.Edit },
+      { name: "Personal Plan Management", path: "/personal-plan-management", icon: Icons.Task },
+      
       { name: "Progress", path: "/progress-page", icon: Icons.Progress },
     ];
   }
@@ -224,7 +224,7 @@ export default function Sidebar() {
         {!collapsed && (
           <div className="sidebar-footer">
             <div className="ministry-badge">
-              <div className="badge-icon">🌱</div>
+             
               <div className="badge-text">
                 <span className="ministry-name">Ministry of</span>
                 <span className="ministry-dept">Agriculture</span>
@@ -236,7 +236,7 @@ export default function Sidebar() {
         
         {collapsed && (
           <div className="collapsed-footer">
-            <div className="ministry-icon">🌱</div>
+            
           </div>
         )}
       </div>

@@ -1,25 +1,61 @@
 import React, { useEffect, useState } from "react";
-import { getIssuesAssignedToMe, updateIssue, getCurrentUser } from "../api/redmineApi";
+import { 
+  getIssuesCreatedByUser, 
+  updateIssue, 
+  getCurrentUser,
+  getIssue 
+} from "../api/redmineApi";
 
 export default function ProgressPage() {
   const [issues, setIssues] = useState([]);
   const [currentUser, setCurrentUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [showPopup, setShowPopup] = useState(false);
+  const [selectedIssue, setSelectedIssue] = useState(null);
+  const [selectedQuarter, setSelectedQuarter] = useState("");
+  const [quarterValue, setQuarterValue] = useState("");
+  const [calculatedPercent, setCalculatedPercent] = useState(0);
+  const [newDoneRatio, setNewDoneRatio] = useState(0);
+  
   const today = new Date();
 
   useEffect(() => {
     async function load() {
-      const user = await getCurrentUser();
-      setCurrentUser(user);
-
-      const data = await getIssuesAssignedToMe();
-
-      // Filter issues to only those assigned to current user's full name
-      const fullName = user.firstname && user.lastname ? `${user.firstname} ${user.lastname}` : user.login;
-      const filteredIssues = data.filter(
-        (issue) => issue.assigned_to && issue.assigned_to.name === fullName
-      );
-
-      setIssues(filteredIssues);
+      try {
+        setLoading(true);
+        const user = await getCurrentUser();
+        setCurrentUser(user);
+        
+        if (!user) return;
+        
+        const createdIssues = await getIssuesCreatedByUser(user.id);
+        const filteredIssues = [];
+        
+        for (const issue of createdIssues) {
+          try {
+            if (issue.parent && issue.parent.id) {
+              const directParent = await getIssue(issue.parent.id);
+              
+              if (directParent && directParent.parent && directParent.parent.id) {
+                const grandparent = await getIssue(directParent.parent.id);
+                
+                if (grandparent && !grandparent.parent) {
+                  const fullIssue = await getIssue(issue.id);
+                  filteredIssues.push(fullIssue);
+                }
+              }
+            }
+          } catch (err) {
+            console.error(`Error checking hierarchy for issue ${issue.id}:`, err);
+          }
+        }
+        
+        setIssues(filteredIssues);
+      } catch (err) {
+        console.error("Error loading progress data:", err);
+      } finally {
+        setLoading(false);
+      }
     }
     load();
   }, []);
@@ -37,6 +73,15 @@ export default function ProgressPage() {
     return String(field.value);
   };
 
+  const getCustomFieldAsNumber = (issue, fieldName) => {
+    const value = getCustomField(issue, fieldName);
+    if (!value) return 0;
+    
+    // Remove any non-numeric characters except decimal point and minus sign
+    const cleaned = value.replace(/[^\d.-]/g, '');
+    return parseFloat(cleaned) || 0;
+  };
+
   const customFieldNames = [
     "የዓመቱ እቅድ",
     "1ኛ ሩብዓመት",
@@ -47,20 +92,42 @@ export default function ProgressPage() {
 
   const getFiscalYear = (date) => {
     const d = new Date(date);
-    const fyStart = new Date(`${d.getFullYear()}-07-08`);
-    return d >= fyStart ? d.getFullYear() : d.getFullYear() - 1;
+    const month = d.getMonth() + 1;
+    const day = d.getDate();
+    
+    if (month > 5 || (month === 5 && day >= 9)) {
+      return d.getFullYear();
+    } else {
+      return d.getFullYear() - 1;
+    }
   };
 
   const getQuarterDateRange = (quarterName, fy) => {
     switch (quarterName) {
       case "1ኛ ሩብዓመት":
-        return [new Date(`${fy}-07-08`), new Date(`${fy}-10-07`)];
+        return [
+          new Date(`${fy}-05-09`),
+          new Date(`${fy}-10-10`)
+        ];
+        
       case "2ኛ ሩብዓመት":
-        return [new Date(`${fy}-10-08`), new Date(`${fy + 1}-01-07`)];
+        return [
+          new Date(`${fy}-10-11`),
+          new Date(`${fy + 1}-01-08`)
+        ];
+        
       case "3ኛ ሩብዓመት":
-        return [new Date(`${fy + 1}-01-08`), new Date(`${fy + 1}-04-07`)];
+        return [
+          new Date(`${fy + 1}-01-09`),
+          new Date(`${fy + 1}-04-08`)
+        ];
+        
       case "4ኛ ሩብዓመት":
-        return [new Date(`${fy + 1}-04-08`), new Date(`${fy + 1}-07-07`)];
+        return [
+          new Date(`${fy + 1}-04-09`),
+          new Date(`${fy + 1}-07-07`)
+        ];
+        
       default:
         return [null, null];
     }
@@ -69,7 +136,27 @@ export default function ProgressPage() {
   const isQuarterActive = (quarterName) => {
     const fy = getFiscalYear(today);
     const [qStart, qEnd] = getQuarterDateRange(quarterName, fy);
-    return today >= qStart && today <= qEnd;
+    
+    if (!qStart || !qEnd) return false;
+    
+    const todayDateOnly = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    const startDateOnly = new Date(qStart.getFullYear(), qStart.getMonth(), qStart.getDate());
+    const endDateOnly = new Date(qEnd.getFullYear(), qEnd.getMonth(), qEnd.getDate());
+    
+    return todayDateOnly >= startDateOnly && todayDateOnly <= endDateOnly;
+  };
+
+  const getCurrentQuarter = () => {
+    const fy = getFiscalYear(today);
+    const quarters = ["1ኛ ሩብዓመት", "2ኛ ሩብዓመት", "3ኛ ሩብዓመት", "4ኛ ሩብዓመት"];
+    
+    for (const quarter of quarters) {
+      if (isQuarterActive(quarter)) {
+        return quarter;
+      }
+    }
+    
+    return null;
   };
 
   const getQuarterProgressRange = (quarterName) => {
@@ -87,28 +174,101 @@ export default function ProgressPage() {
     }
   };
 
-  const getDropdownOptions = (min, max) => {
-    const options = [];
-    for (let p = min; p <= max; p++) options.push(p);
-    return options;
-  };
-
-  const handleProgressChange = async (issueId, newValue) => {
+  const handleProgressChange = async (issueId, newDoneRatio) => {
     setIssues((prev) =>
-      prev.map((i) => (i.id === issueId ? { ...i, done_ratio: newValue } : i))
+      prev.map((i) => (i.id === issueId ? { ...i, done_ratio: newDoneRatio } : i))
     );
-    await updateIssue(issueId, { done_ratio: newValue });
-  };
-
-  const mapToQuarterRange = (quarterName, value) => {
-    const [min, max] = getQuarterProgressRange(quarterName);
-    return Math.round(min + ((max - min) * value) / 100);
+    await updateIssue(issueId, { done_ratio: newDoneRatio });
   };
 
   const mapFromQuarterRange = (quarterName, doneRatio) => {
     const [min, max] = getQuarterProgressRange(quarterName);
     if (max === min) return 0;
     return Math.round(((doneRatio - min) / (max - min)) * 100);
+  };
+
+  const handlePerformanceClick = (issue, quarterName) => {
+    setSelectedIssue(issue);
+    setSelectedQuarter(quarterName);
+    setQuarterValue("");
+    setCalculatedPercent(0);
+    setNewDoneRatio(0);
+    setShowPopup(true);
+  };
+
+  const calculatePerformance = () => {
+    if (!quarterValue || !selectedIssue) return;
+    
+    // Parse quarter value - remove any non-numeric characters except decimal point
+    const quarterTargetStr = quarterValue.toString().replace(/[^\d.-]/g, '');
+    const quarterTarget = parseFloat(quarterTargetStr) || 0;
+    
+    // Get annual plan as a number
+    const annualPlan = getCustomFieldAsNumber(selectedIssue, "የዓመቱ እቅድ");
+    const currentDoneRatio = selectedIssue.done_ratio || 0;
+    
+    console.log("Calculation values:", {
+      quarterTarget,
+      annualPlan,
+      currentDoneRatio,
+      quarterValueInput: quarterValue
+    });
+    
+    if (annualPlan > 0 && quarterTarget > 0) {
+      // Formula: (quarter_input_value × 100) / annual_plan
+      const newPercent = (quarterTarget * 100) / annualPlan;
+      console.log("New percent calculated:", newPercent);
+      setCalculatedPercent(newPercent);
+      
+      // Calculate new done ratio: current_done_ratio + new_percent
+      const totalDoneRatio = Math.min(currentDoneRatio + newPercent, 100);
+      console.log("Total done ratio:", totalDoneRatio);
+      setNewDoneRatio(Math.round(totalDoneRatio));
+    } else {
+      // Reset if invalid values
+      setCalculatedPercent(0);
+      setNewDoneRatio(0);
+    }
+  };
+
+  // Add a useEffect to recalculate when quarterValue changes
+  useEffect(() => {
+    if (selectedIssue && quarterValue) {
+      calculatePerformance();
+    }
+  }, [quarterValue, selectedIssue]);
+
+  const handleSavePerformance = () => {
+    if (!selectedIssue || !selectedQuarter || !quarterValue || newDoneRatio === 0) return;
+    
+    handleProgressChange(selectedIssue.id, newDoneRatio);
+    
+    setShowPopup(false);
+    setSelectedIssue(null);
+    setSelectedQuarter("");
+    setQuarterValue("");
+    setCalculatedPercent(0);
+    setNewDoneRatio(0);
+  };
+
+  const isPerformanceButtonActive = (issue, quarterName) => {
+    const quarterVal = getCustomField(issue, quarterName);
+    const currentQuarter = getCurrentQuarter();
+    
+    const isJan8_2026 = today.toLocaleDateString() === "1/8/2026";
+    const isQ2 = quarterName === "2ኛ ሩብዓመት";
+    const showQ2Button = isJan8_2026 && isQ2 && quarterVal !== "" && quarterVal !== "0";
+    
+    return (
+      quarterName !== "የዓመቱ እቅድ" && 
+      quarterVal !== "" && 
+      quarterVal !== "0" &&
+      (quarterName === currentQuarter || showQ2Button)
+    );
+  };
+
+  const getCurrentQuarterProgress = (doneRatio, quarterName) => {
+    return mapFromQuarterRange(quarterName, doneRatio);
   };
 
   const tableStyle = {
@@ -133,101 +293,478 @@ export default function ProgressPage() {
     borderBottom: "1px solid #ddd",
   };
 
-  const trHoverStyle = {
-    transition: "background 0.3s",
-  };
+  if (loading) {
+    return (
+      <div style={{ 
+        padding: "30px", 
+        display: "flex", 
+        justifyContent: "center", 
+        alignItems: "center",
+        height: "200px" 
+      }}>
+        <div>Loading progress data...</div>
+      </div>
+    );
+  }
+
+  const currentQuarter = getCurrentQuarter();
+  const fiscalYearStart = getFiscalYear(today);
+  const fiscalYearEnd = fiscalYearStart + 1;
+  const isJan8_2026 = today.toLocaleDateString() === "1/8/2026";
 
   return (
     <div
       style={{
         padding: "30px",
         fontFamily: "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif",
+        position: "relative",
       }}
     >
       <h1 style={{ textAlign: "center", marginBottom: "25px", color: "#333" }}>
         Quarterly Progress
       </h1>
 
-      <div style={{ overflowX: "auto" }}>
-        <table style={tableStyle}>
-          <thead>
-            <tr>
-              <th style={{ ...thStyle, borderTopLeftRadius: "10px" }}>Subject</th>
-              {customFieldNames.map((name, idx) => (
-                <th
-                  key={name}
-                  style={{
-                    ...thStyle,
-                    borderTopRightRadius:
-                      idx === customFieldNames.length - 1 ? "10px" : "0",
-                  }}
-                >
-                  {name}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {issues.map((issue, idx) => (
-              <tr
-                key={issue.id}
-                style={{
-                  backgroundColor: idx % 2 === 0 ? "#f9f9f9" : "#fff",
-                  ...trHoverStyle,
-                }}
-                onMouseEnter={(e) =>
-                  (e.currentTarget.style.backgroundColor = "#e8f5e9")
-                }
-                onMouseLeave={(e) =>
-                  (e.currentTarget.style.backgroundColor =
-                    idx % 2 === 0 ? "#f9f9f9" : "#fff")
-                }
-              >
-                <td style={tdStyle}>{issue.subject}</td>
-
-                {customFieldNames.map((name) => {
-                  const val = getCustomField(issue, name);
-                  const editable =
-                    name !== "የዓመቱ እቅድ" && val !== "" && val !== "0" && isQuarterActive(name);
-
-                  return (
-                    <td key={name} style={tdStyle}>
-                      <div>{val}</div>
-
-                      {editable ? (
-                        <select
-                          style={{
-                            marginTop: "6px",
-                            padding: "6px",
-                            borderRadius: "5px",
-                            border: "1px solid #ccc",
-                            outline: "none",
-                            cursor: "pointer",
-                          }}
-                          value={mapFromQuarterRange(name, issue.done_ratio || 0)}
-                          onChange={(e) => {
-                            const newDoneRatio = mapToQuarterRange(
-                              name,
-                              Number(e.target.value)
-                            );
-                            handleProgressChange(issue.id, newDoneRatio);
-                          }}
-                        >
-                          {getDropdownOptions(0, 100).map((p) => (
-                            <option key={p} value={p}>
-                              {p}%
-                            </option>
-                          ))}
-                        </select>
-                      ) : null}
-                    </td>
-                  );
-                })}
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      {/* Current Quarter Info */}
+      <div style={{ 
+        textAlign: "center", 
+        marginBottom: "20px",
+        padding: "15px",
+        backgroundColor: currentQuarter ? "#e8f5e9" : (isJan8_2026 ? "#fff3e0" : "#ffebee"),
+        borderRadius: "5px",
+        border: `1px solid ${currentQuarter ? "#4CAF50" : (isJan8_2026 ? "#FF9800" : "#f44336")}`
+      }}>
+        <div style={{ fontWeight: "bold", color: currentQuarter ? "#2E7D32" : (isJan8_2026 ? "#EF6C00" : "#d32f2f") }}>
+          Ethiopian Fiscal Year Information
+        </div>
+        <div>Current Date: {today.toLocaleDateString()}</div>
+        <div>Fiscal Year: {fiscalYearStart}-{fiscalYearEnd}</div>
+        <div>
+          <strong>Current Quarter: {currentQuarter || "No active quarter"}</strong>
+        </div>
+        
+        {isJan8_2026 && !currentQuarter && (
+          <div style={{ marginTop: "10px", padding: "10px", backgroundColor: "#fff8e1", borderRadius: "5px" }}>
+            <div style={{ color: "#EF6C00", fontWeight: "bold" }}>
+              Today is the last day of Q2 (2ኛ ሩብዓመት)
+            </div>
+            <div style={{ fontSize: "12px", color: "#666", marginTop: "5px" }}>
+              Q3 starts tomorrow (January 9, 2026)
+            </div>
+          </div>
+        )}
+        
+        {/* Display quarter dates */}
+        <div style={{ 
+          marginTop: "15px", 
+          padding: "10px", 
+          backgroundColor: "#f5f5f5", 
+          borderRadius: "5px",
+          fontSize: "12px",
+          textAlign: "left"
+        }}>
+          <div style={{ fontWeight: "bold", marginBottom: "5px" }}>
+            Quarter Dates for Fiscal Year {fiscalYearStart}-{fiscalYearEnd}:
+          </div>
+          {customFieldNames.filter(name => name !== "የዓመቱ እቅድ").map(name => {
+            const [start, end] = getQuarterDateRange(name, fiscalYearStart);
+            const isActive = isQuarterActive(name);
+            
+            return (
+              <div key={name} style={{ 
+                color: isActive ? "#4CAF50" : "#666",
+                marginBottom: "3px",
+                padding: "3px",
+                backgroundColor: isActive ? "#f0fff0" : "transparent",
+                borderRadius: "3px",
+                borderLeft: isActive ? "3px solid #4CAF50" : "none"
+              }}>
+                <strong>{name}:</strong> {start?.toLocaleDateString()} - {end?.toLocaleDateString()}
+                {isActive && <span style={{ fontWeight: "bold", marginLeft: "10px" }}>✓ ACTIVE</span>}
+              </div>
+            );
+          })}
+        </div>
+        
+        <div style={{ marginTop: "15px", fontSize: "12px", color: "#666" }}>
+          Fiscal Year starts with Q1 on May 9, {fiscalYearStart}
+        </div>
       </div>
+
+      {issues.length === 0 ? (
+        <div style={{ 
+          textAlign: "center", 
+          padding: "40px",
+          color: "#888",
+          fontSize: "16px"
+        }}>
+          No hierarchical issues found that were created by you.
+        </div>
+      ) : (
+        <div style={{ overflowX: "auto" }}>
+          <table style={tableStyle}>
+            <thead>
+              <tr>
+                <th style={{ ...thStyle, borderTopLeftRadius: "10px" }}>Subject</th>
+                <th style={thStyle}>Current %</th>
+                {customFieldNames.map((name, idx) => (
+                  <th
+                    key={name}
+                    style={{
+                      ...thStyle,
+                      borderTopRightRadius:
+                        idx === customFieldNames.length - 1 ? "10px" : "0",
+                    }}
+                  >
+                    {name}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {issues.map((issue, idx) => (
+                <tr
+                  key={issue.id}
+                  style={{
+                    backgroundColor: idx % 2 === 0 ? "#f9f9f9" : "#fff",
+                    transition: "background 0.3s",
+                  }}
+                  onMouseEnter={(e) =>
+                    (e.currentTarget.style.backgroundColor = "#e8f5e9")
+                  }
+                  onMouseLeave={(e) =>
+                    (e.currentTarget.style.backgroundColor =
+                      idx % 2 === 0 ? "#f9f9f9" : "#fff")
+                  }
+                >
+                  <td style={tdStyle}>
+                    <div>{issue.subject}</div>
+                  </td>
+                  
+                  <td style={tdStyle}>
+                    <div style={{ 
+                      fontWeight: "bold", 
+                      color: issue.done_ratio > 50 ? "#4CAF50" : "#2196F3" 
+                    }}>
+                      {issue.done_ratio || 0}%
+                    </div>
+                  </td>
+
+                  {customFieldNames.map((name) => {
+                    const val = getCustomField(issue, name);
+                    const isActive = isPerformanceButtonActive(issue, name);
+                    const currentQuarterProgress = getCurrentQuarterProgress(issue.done_ratio || 0, name);
+                    const isCurrentQuarter = name === currentQuarter;
+                    const isQ2 = name === "2ኛ ሩብዓመት";
+                    const showQ2Button = isJan8_2026 && isQ2 && val !== "" && val !== "0";
+                    
+                    return (
+                      <td key={name} style={tdStyle}>
+                        <div style={{ marginBottom: "8px", position: "relative" }}>
+                          <div>{val || "(empty)"}</div>
+                          {isCurrentQuarter && (
+                            <div style={{
+                              position: "absolute",
+                              top: "-8px",
+                              right: "-8px",
+                              backgroundColor: "#FF9800",
+                              color: "white",
+                              fontSize: "10px",
+                              padding: "2px 6px",
+                              borderRadius: "3px",
+                              fontWeight: "bold"
+                            }}>
+                              CURRENT
+                            </div>
+                          )}
+                          {showQ2Button && !isCurrentQuarter && (
+                            <div style={{
+                              position: "absolute",
+                              top: "-8px",
+                              right: "-8px",
+                              backgroundColor: "#FF5722",
+                              color: "white",
+                              fontSize: "10px",
+                              padding: "2px 6px",
+                              borderRadius: "3px",
+                              fontWeight: "bold"
+                            }}>
+                              LAST DAY
+                            </div>
+                          )}
+                        </div>
+                        
+                        {(isActive || showQ2Button) ? (
+                          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "5px" }}>
+                            <div style={{ fontSize: "12px", color: "#666" }}>
+                              Current Progress: {issue.done_ratio || 0}%
+                            </div>
+                            <button
+                              onClick={() => handlePerformanceClick(issue, name)}
+                              style={{
+                                padding: "8px 16px",
+                                backgroundColor: showQ2Button ? "#FF5722" : "#FF9800",
+                                color: "white",
+                                border: "none",
+                                borderRadius: "4px",
+                                cursor: "pointer",
+                                fontSize: "14px",
+                                fontWeight: "bold",
+                                transition: "background-color 0.3s",
+                                boxShadow: "0 2px 4px rgba(0,0,0,0.2)"
+                              }}
+                              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = showQ2Button ? "#E64A19" : "#F57C00"}
+                              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = showQ2Button ? "#FF5722" : "#FF9800"}
+                            >
+                              {showQ2Button ? "Add Performance (Last Day)" : "Add Performance"}
+                            </button>
+                          </div>
+                        ) : name !== "የዓመቱ እቅድ" && val !== "" && val !== "0" && !isCurrentQuarter ? (
+                          <div style={{ fontSize: "12px", color: "#757575", fontStyle: "italic" }}>
+                            Quarter not active
+                          </div>
+                        ) : null}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Performance Popup */}
+      {showPopup && selectedIssue && (
+        <div style={{
+          position: "fixed",
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: "rgba(0, 0, 0, 0.5)",
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          zIndex: 1000,
+        }}>
+          <div style={{
+            backgroundColor: "white",
+            padding: "30px",
+            borderRadius: "10px",
+            boxShadow: "0 10px 30px rgba(0,0,0,0.3)",
+            width: "450px",
+            maxWidth: "90%",
+          }}>
+            <h3 style={{ marginBottom: "20px", color: "#333" }}>
+              Add Performance Achievement
+            </h3>
+            
+            <div style={{ marginBottom: "15px" }}>
+              <strong>Issue:</strong> {selectedIssue.subject}
+            </div>
+            
+            <div style={{ marginBottom: "15px" }}>
+              <strong>Quarter:</strong> {selectedQuarter}
+              {selectedQuarter === currentQuarter && (
+                <span style={{ 
+                  backgroundColor: "#FF9800", 
+                  color: "white", 
+                  padding: "2px 8px", 
+                  borderRadius: "3px",
+                  fontSize: "12px",
+                  marginLeft: "10px"
+                }}>
+                  CURRENT QUARTER
+                </span>
+              )}
+              {selectedQuarter === "2ኛ ሩብዓመት" && isJan8_2026 && (
+                <span style={{ 
+                  backgroundColor: "#FF5722", 
+                  color: "white", 
+                  padding: "2px 8px", 
+                  borderRadius: "3px",
+                  fontSize: "12px",
+                  marginLeft: "10px"
+                }}>
+                  LAST DAY OF Q2
+                </span>
+              )}
+            </div>
+            
+            <div style={{ 
+              marginBottom: "20px", 
+              padding: "15px", 
+              backgroundColor: "#f0f8ff",
+              borderRadius: "5px",
+              borderLeft: "4px solid #2196F3"
+            }}>
+              <div><strong>Annual Plan:</strong> {getCustomField(selectedIssue, "የዓመቱ እቅድ")} (Value: {getCustomFieldAsNumber(selectedIssue, "የዓመቱ እቅድ")})</div>
+              <div><strong>Current Done Ratio:</strong> {selectedIssue.done_ratio || 0}%</div>
+              <div><strong>Current Quarter Progress:</strong> {mapFromQuarterRange(selectedQuarter, selectedIssue.done_ratio || 0)}%</div>
+            </div>
+            
+            <div style={{ marginBottom: "15px" }}>
+              <label style={{ display: "block", marginBottom: "5px", fontWeight: "bold" }}>
+                Quarter Achievement Value:
+              </label>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={quarterValue}
+                onChange={(e) => {
+                  // Allow only numbers and decimal point
+                  const input = e.target.value;
+                  // Replace comma with dot for decimal separator
+                  const normalized = input.replace(/,/g, '.');
+                  // Allow numbers, dots, and minus signs
+                  if (/^[-]?\d*\.?\d*$/.test(normalized)) {
+                    setQuarterValue(normalized);
+                  }
+                }}
+                style={{
+                  width: "100%",
+                  padding: "10px",
+                  borderRadius: "4px",
+                  border: "1px solid #ccc",
+                  fontSize: "16px",
+                  boxSizing: "border-box",
+                }}
+                placeholder="Enter achievement value for this quarter"
+              />
+              <div style={{ fontSize: "12px", color: "#666", marginTop: "5px" }}>
+                Enter numeric value (e.g., 1000 or 1000.50)
+              </div>
+            </div>
+            
+            {quarterValue && calculatedPercent > 0 && (
+              <div style={{
+                marginBottom: "20px",
+                padding: "15px",
+                backgroundColor: "#f5f5f5",
+                borderRadius: "5px",
+                border: "1px solid #ddd",
+              }}>
+                <div style={{ marginBottom: "10px", fontWeight: "bold", color: "#2196F3" }}>
+                  Performance Calculation
+                </div>
+                <div style={{ fontSize: "14px", color: "#666", marginBottom: "5px" }}>
+                  <div>Quarter Achievement: {quarterValue}</div>
+                  <div>Annual Plan: {getCustomFieldAsNumber(selectedIssue, "የዓመቱ እቅድ")}</div>
+                  <div style={{ margin: "5px 0" }}>
+                    ({quarterValue} × 100) ÷ {getCustomFieldAsNumber(selectedIssue, "የዓመቱ እቅድ")} = <strong>{calculatedPercent.toFixed(2)}%</strong>
+                  </div>
+                </div>
+                
+                <div style={{ 
+                  marginTop: "10px", 
+                  paddingTop: "10px", 
+                  borderTop: "1px dashed #ddd" 
+                }}>
+                  <div style={{ fontSize: "14px", marginBottom: "5px" }}>
+                    <strong>Adding to Current Progress:</strong>
+                  </div>
+                  <div style={{ fontSize: "14px", color: "#666" }}>
+                    Current: {selectedIssue.done_ratio || 0}% + New: {calculatedPercent.toFixed(2)}% = {Math.min((selectedIssue.done_ratio || 0) + calculatedPercent, 100).toFixed(2)}%
+                  </div>
+                  <div style={{ 
+                    fontSize: "14px", 
+                    color: "#4CAF50",
+                    fontWeight: "bold",
+                    marginTop: "5px"
+                  }}>
+                    New Done Ratio: {newDoneRatio}%
+                  </div>
+                </div>
+              </div>
+            )}
+            
+            {quarterValue && calculatedPercent === 0 && (
+              <div style={{
+                marginBottom: "20px",
+                padding: "15px",
+                backgroundColor: "#fff8e1",
+                borderRadius: "5px",
+                border: "1px solid #ffd54f",
+              }}>
+                <div style={{ color: "#ff6f00", fontWeight: "bold" }}>
+                  Cannot Calculate
+                </div>
+                <div style={{ fontSize: "14px", color: "#666", marginTop: "5px" }}>
+                  Please check if:
+                  <ul style={{ marginLeft: "20px", marginTop: "5px" }}>
+                    <li>Quarter achievement value is valid</li>
+                    <li>Annual plan value is greater than 0</li>
+                    <li>All values are numeric</li>
+                  </ul>
+                </div>
+              </div>
+            )}
+            
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "20px" }}>
+              <button
+                onClick={() => {
+                  setShowPopup(false);
+                  setSelectedIssue(null);
+                  setSelectedQuarter("");
+                  setQuarterValue("");
+                  setCalculatedPercent(0);
+                  setNewDoneRatio(0);
+                }}
+                style={{
+                  padding: "10px 20px",
+                  backgroundColor: "#f5f5f5",
+                  color: "#333",
+                  border: "1px solid #ccc",
+                  borderRadius: "4px",
+                  cursor: "pointer",
+                  fontSize: "14px",
+                }}
+              >
+                Cancel
+              </button>
+              
+              <button
+                onClick={handleSavePerformance}
+                disabled={!quarterValue || newDoneRatio === 0}
+                style={{
+                  padding: "10px 20px",
+                  backgroundColor: newDoneRatio > 0 ? "#4CAF50" : "#ccc",
+                  color: "white",
+                  border: "none",
+                  borderRadius: "4px",
+                  cursor: newDoneRatio > 0 ? "pointer" : "not-allowed",
+                  opacity: newDoneRatio > 0 ? 1 : 0.6,
+                  fontSize: "14px",
+                  fontWeight: "bold",
+                }}
+              >
+                Save Performance ({selectedIssue.done_ratio || 0}% → {newDoneRatio}%)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {issues.length > 0 && (
+        <div style={{ 
+          marginTop: "20px", 
+          fontSize: "12px", 
+          color: "#666",
+          textAlign: "center" 
+        }}>
+          <div>Showing {issues.length} issue(s) with grandparent → parent → child hierarchy</div>
+          <div style={{ marginTop: "5px", fontWeight: "bold", color: currentQuarter ? "#2E7D32" : "#EF6C00" }}>
+            {currentQuarter 
+              ? `Performance buttons enabled for current quarter (${currentQuarter})`
+              : isJan8_2026
+                ? "January 8, 2026 is the last day of Q2. Special button shown for Q2."
+                : `No active quarter detected for ${today.toLocaleDateString()}`}
+          </div>
+          <div style={{ marginTop: "5px", fontSize: "11px", color: "#888" }}>
+            Fiscal Year {fiscalYearStart}-{fiscalYearEnd} (Q1 starts May 9, {fiscalYearStart})
+          </div>
+        </div>
+      )}
     </div>
   );
 }
