@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import React, { useEffect, useState, useCallback, useMemo } from "react";
 import {
   getCurrentUser,
   getMyMainProjects,
@@ -22,291 +22,181 @@ import {
 import "./StateMinisterDashboard.css";
 
 // ============================
-// UPDATED PERIOD FILTERING FUNCTIONS (from Team Leader Dashboard)
+// PERIOD DEFINITIONS (Date-based only)
 // ============================
 
-// Helper function to check if a quarterly field has a valid value
-const hasValidQuarterValue = (issue, quarter) => {
-  const value = getField(issue, quarter);
-  return value && value !== "0" && value !== "" && value !== "0.0" && value !== "0.00";
-};
-
-// Count how many quarters have valid values for an issue
-const countValidQuarters = (issue) => {
-  const quarters = ["1ኛ ሩብዓመት", "2ኛ ሩብዓመት", "3ኛ ሩብዓመት", "4ኛ ሩብዓመት"];
-  return quarters.filter(quarter => hasValidQuarterValue(issue, quarter)).length;
-};
-
-// Get the index of a quarter (1-4) for mapping
-const getQuarterIndex = (quarter) => {
-  switch(quarter) {
-    case "1ኛ ሩብዓመት": return 1;
-    case "2ኛ ሩብዓመት": return 2;
-    case "3ኛ ሩብዓመት": return 3;
-    case "4ኛ ሩብዓመት": return 4;
-    default: return 0;
+// Define fiscal year periods
+const PERIOD_DATES = {
+  YEARLY: {
+    start: new Date("2025-07-08"),
+    end: new Date("2026-07-07"),
+    name: "Yearly",
+    label: "Yearly (Fiscal Year 2025-26)",
+    color: "#2E7D32"
+  },
+  Q1: {
+    start: new Date("2025-07-08"),
+    end: new Date("2025-10-10"),
+    name: "1ኛ ሩብዓመት",
+    label: "Q1 (Jul 8, 2025 - Oct 10, 2025)",
+    color: "#1976d2"
+  },
+  Q2: {
+    start: new Date("2025-10-11"),
+    end: new Date("2026-01-08"),
+    name: "2ኛ ሩብዓመት",
+    label: "Q2 (Oct 11, 2025 - Jan 8, 2026)",
+    color: "#1976d2"
+  },
+  Q3: {
+    start: new Date("2026-01-09"),
+    end: new Date("2026-04-08"),
+    name: "3ኛ ሩብዓመት",
+    label: "Q3 (Jan 9, 2026 - Apr 8, 2026)",
+    color: "#1976d2"
+  },
+  Q4: {
+    start: new Date("2026-04-09"),
+    end: new Date("2026-07-07"),
+    name: "4ኛ ሩብዓመት",
+    label: "Q4 (Apr 9, 2026 - Jul 7, 2026)",
+    color: "#1976d2"
+  },
+  "6_MONTHS": {
+    start: new Date("2025-07-08"),
+    end: new Date("2026-01-08"),
+    name: "6 Months",
+    label: "6 Months (Jul 8, 2025 - Jan 8, 2026)",
+    color: "#f57c00"
+  },
+  "9_MONTHS": {
+    start: new Date("2025-07-08"),
+    end: new Date("2026-04-08"),
+    name: "9 Months",
+    label: "9 Months (Jul 8, 2025 - Apr 8, 2026)",
+    color: "#f57c00"
   }
 };
 
-// Get quarter ranges based on number of valid quarters and target quarter index
-const getQuarterRanges = (validQuartersCount, targetQuarterIndex) => {
-  if (validQuartersCount === 4) {
-    // All 4 quarters valid - equal 25% each
-    const ranges = [
-      { start: 0, end: 25 },    // Q1: 0-25%
-      { start: 25, end: 50 },   // Q2: 25-50%
-      { start: 50, end: 75 },   // Q3: 50-75%
-      { start: 75, end: 100 }   // Q4: 75-100%
-    ];
-    return ranges[targetQuarterIndex - 1] || { start: 0, end: 100 };
-  }
-  
-  if (validQuartersCount === 3) {
-    // 3 quarters valid - equal 33.33% each
-    const segment = 100 / 3;
-    const ranges = [];
-    let currentStart = 0;
-    
-    // Create ranges for first 3 quarters
-    for (let i = 0; i < 3; i++) {
-      ranges.push({
-        start: currentStart,
-        end: currentStart + segment
-      });
-      currentStart += segment;
-    }
-    
-    // Find which quarter index maps to which range
-    // This is simplified - assuming the first 3 quarters are valid
-    return targetQuarterIndex <= 3 ? ranges[targetQuarterIndex - 1] : { start: 0, end: 100 };
-  }
-  
-  if (validQuartersCount === 2) {
-    // 2 quarters valid - equal 50% each
-    const ranges = [
-      { start: 0, end: 50 },    // First valid quarter
-      { start: 50, end: 100 }   // Second valid quarter
-    ];
-    
-    // Determine which range to use based on quarter index
-    if (targetQuarterIndex === 1 || targetQuarterIndex === 2) return ranges[0];
-    if (targetQuarterIndex === 3 || targetQuarterIndex === 4) return ranges[1];
-    return { start: 0, end: 100 };
-  }
-  
-  if (validQuartersCount === 1) {
-    // 1 quarter valid - use full range
-    return { start: 0, end: 100 };
-  }
-  
-  // Default fallback
-  return { start: 0, end: 100 };
+// Helper function to check if date is valid
+const isValidDate = (dateString) => {
+  if (!dateString) return false;
+  const date = new Date(dateString);
+  return !isNaN(date.getTime());
 };
 
-// UPDATED: Map progress based on selected period and quarterly distribution
-const mapProgress = (done, period, issue = null) => {
-  if (!done) done = 0;
+// Helper function to calculate date overlap percentage
+const calculateDateOverlap = (startDate, dueDate, periodName) => {
+  if (!isValidDate(startDate) || !isValidDate(dueDate)) return 0;
   
-  // For non-quarterly periods, use existing logic
-  if (period === "Yearly") return done;
+  const start = new Date(startDate);
+  const due = new Date(dueDate);
   
-  if (period === "6 Months") {
-    // For 6 months, target is 50% of yearly
-    return done <= 50 ? Math.round((done / 50) * 100) : 100;
+  // Find period
+  let periodData;
+  if (periodName === "Yearly") {
+    periodData = PERIOD_DATES.YEARLY;
+  } else if (periodName === "6 Months") {
+    periodData = PERIOD_DATES["6_MONTHS"];
+  } else if (periodName === "9 Months") {
+    periodData = PERIOD_DATES["9_MONTHS"];
+  } else {
+    // Find quarterly period
+    periodData = Object.values(PERIOD_DATES).find(p => p.name === periodName);
   }
   
-  if (period === "9 Months") {
-    // For 9 months, target is 75% of yearly
-    return done <= 75 ? Math.round((done / 75) * 100) : 100;
-  }
-
-  // Handle quarterly periods with dynamic distribution
-  if (period.includes("ሩብዓመት")) {
-    // If no issue provided, use old logic
-    if (!issue) {
-      switch (period) {
-        case "1ኛ ሩብዓመት":
-          return done <= 25 ? Math.round((done / 25) * 100) : 100;
-        case "2ኛ ሩብዓመት":
-          return done >= 26 && done <= 50
-            ? Math.round(((done - 26) / 24) * 100)
-            : done > 50
-            ? 100
-            : 0;
-        case "3ኛ ሩብዓመት":
-          return done >= 51 && done <= 75
-            ? Math.round(((done - 51) / 24) * 100)
-            : done > 75
-            ? 100
-            : 0;
-        case "4ኛ ሩብዓመት":
-          return done >= 76 && done <= 100
-            ? Math.round(((done - 76) / 24) * 100)
-            : done === 100
-            ? 100
-            : 0;
-        default:
-          return 0;
-      }
-    }
-    
-    // Count how many quarterly fields have valid values
-    const validQuartersCount = countValidQuarters(issue);
-    const targetQuarterIndex = getQuarterIndex(period);
-    
-    // Get the specific quarter's value
-    const hasValidValue = hasValidQuarterValue(issue, period);
-    
-    // If this quarter doesn't have a valid value, return 0
-    if (!hasValidValue) return 0;
-    
-    // If only one quarter has value, use done percentage as is
-    if (validQuartersCount === 1) {
-      return done;
-    }
-    
-    // Get the range for this quarter based on valid quarters count
-    const range = getQuarterRanges(validQuartersCount, targetQuarterIndex);
-    
-    // Calculate progress within this quarter's range
-    if (done <= range.start) {
-      return 0;
-    } else if (done >= range.end) {
-      return 100;
-    } else {
-      // Map done percentage to 0-100 within this quarter's range
-      const progressInRange = ((done - range.start) / (range.end - range.start)) * 100;
-      return Math.round(progressInRange);
-    }
-  }
+  if (!periodData) return 0;
   
-  return 0;
+  // If issue is completely outside period
+  if (due < periodData.start || start > periodData.end) return 0;
+  
+  // Calculate overlapping days
+  const overlapStart = start < periodData.start ? periodData.start : start;
+  const overlapEnd = due > periodData.end ? periodData.end : due;
+  
+  const totalIssueDays = (due - start) / (1000 * 60 * 60 * 24);
+  const overlapDays = (overlapEnd - overlapStart) / (1000 * 60 * 60 * 24);
+  
+  // Return percentage of issue that falls within period
+  return totalIssueDays > 0 ? (overlapDays / totalIssueDays) * 100 : 100; // If same day, consider 100%
 };
 
-// Get custom field value from issue
-const getField = (issue, fieldName) => {
-  const field = issue.custom_fields?.find((f) => f.name === fieldName);
-  return field?.value;
+// Helper function to filter issues without parent
+const filterTopLevelIssues = (issues) => {
+  return issues.filter(issue => !issue.parent_id && !issue.parent);
 };
 
-// Filter issues by selected period
+// Filter issues by selected period based on date overlap
 const filterIssuesByPeriod = (issues, period) => {
-  if (period === "Yearly") {
-    return issues.filter(issue => {
-      const yearlyValue = getField(issue, "የዓመቱ እቅድ");
-      return yearlyValue && yearlyValue !== "0" && yearlyValue !== "";
-    });
-  }
-
-  if (period === "6 Months") {
-    return issues.filter(issue => {
-      const q1 = getField(issue, "1ኛ ሩብዓመት");
-      const q2 = getField(issue, "2ኛ ሩብዓመት");
-      // Include if either quarter has a valid value
-      return (q1 && q1 !== "0" && q1 !== "") || (q2 && q2 !== "0" && q2 !== "");
-    });
-  }
-
-  if (period === "9 Months") {
-    return issues.filter(issue => {
-      const q1 = getField(issue, "1ኛ ሩብዓመት");
-      const q2 = getField(issue, "2ኛ ሩብዓመት");
-      const q3 = getField(issue, "3ኛ ሩብዓመት");
-      // Include if any of the quarters has a valid value
-      return (q1 && q1 !== "0" && q1 !== "") || 
-             (q2 && q2 !== "0" && q2 !== "") || 
-             (q3 && q3 !== "0" && q3 !== "");
-    });
-  }
-
-  // Quarterly filtering
   return issues.filter(issue => {
-    const val = getField(issue, period);
-    return val && val !== "0" && val !== "";
+    if (!issue.start_date || !issue.due_date) return false;
+    
+    const overlap = calculateDateOverlap(issue.start_date, issue.due_date, period);
+    return overlap > 0;
   });
 };
 
-// Helper function to get weight with default value
+// Calculate progress based on date overlap
+const mapProgress = (done, period, issue = null) => {
+  if (!done) done = 0;
+  
+  // If we have issue with dates, calculate date-based progress
+  if (issue && issue.start_date && issue.due_date) {
+    const overlapPercentage = calculateDateOverlap(issue.start_date, issue.due_date, period);
+    
+    // If no overlap, return 0
+    if (overlapPercentage <= 0) return 0;
+    
+    // Calculate adjusted progress based on overlap
+    // Progress is proportional to both completion percentage and date overlap
+    const adjustedProgress = (done * overlapPercentage) / 100;
+    return Math.min(100, Math.round(adjustedProgress));
+  }
+  
+  // Fallback for issues without dates (use simple logic)
+  return done;
+};
+
+// Get weight - default to 1 since we removed custom field
 const getWeight = (issue) => {
-  const weightValue = getField(issue, "ክብደት");
-  if (!weightValue || weightValue === "0" || weightValue === "") {
-    return 1; // Default weight
-  }
-  return Number(weightValue) || 1;
+  return 1; // All issues have equal weight without custom field
 };
 
 // ============================
-// NEW: TARGET VALUE FUNCTIONS for ዋና ተግባራት Analysis Table
+// TARGET VALUE FUNCTIONS (Simplified - using only dates)
 // ============================
 
-// Get target value based on selected period
+// Get target value - simplified since we don't have custom field targets
+// We'll use a default target of 100 for all issues, adjusted by date overlap
 const getTargetValue = (issue, period) => {
-  if (!issue) return "0";
+  if (!issue) return "100"; // Default target
   
-  if (period === "Yearly") {
-    // For yearly, use "የዓመቱ እቅድ" custom field
-    return getField(issue, "የዓመቱ እቅድ") || "0";
-  }
+  if (!issue.start_date || !issue.due_date) return "100";
   
-  if (period === "6 Months") {
-    // For 6 months, sum Q1 and Q2 values
-    const q1 = getField(issue, "1ኛ ሩብዓመት") || "0";
-    const q2 = getField(issue, "2ኛ ሩብዓመት") || "0";
-    
-    // Convert to numbers and sum
-    const q1Num = parseFloat(q1.toString().trim()) || 0;
-    const q2Num = parseFloat(q2.toString().trim()) || 0;
-    
-    const total = q1Num + q2Num;
-    return total > 0 ? total.toString() : "0";
-  }
+  const overlapPercentage = calculateDateOverlap(issue.start_date, issue.due_date, period);
   
-  if (period === "9 Months") {
-    // For 9 months, sum Q1, Q2, and Q3 values
-    const q1 = getField(issue, "1ኛ ሩብዓመት") || "0";
-    const q2 = getField(issue, "2ኛ ሩብዓመት") || "0";
-    const q3 = getField(issue, "3ኛ ሩብዓመት") || "0";
-    
-    // Convert to numbers and sum
-    const q1Num = parseFloat(q1.toString().trim()) || 0;
-    const q2Num = parseFloat(q2.toString().trim()) || 0;
-    const q3Num = parseFloat(q3.toString().trim()) || 0;
-    
-    const total = q1Num + q2Num + q3Num;
-    return total > 0 ? total.toString() : "0";
-  }
-  
-  // For quarterly periods, use the period name as custom field
-  return getField(issue, period) || "0";
+  // Target is proportional to date overlap
+  const target = (100 * overlapPercentage) / 100; // Base target of 100, adjusted by overlap
+  return target.toFixed(2);
 };
 
-// Calculate actual value (achievement/100 * target value)
-const calculateActualValue = (achievement, targetValue, period) => {
+// Calculate actual value
+const calculateActualValue = (achievement, targetValue) => {
   if (!achievement || !targetValue) return 0;
   
-  // Convert to numbers
   const achievementNum = parseFloat(achievement.toString().trim());
   const targetNum = parseFloat(targetValue.toString().trim());
   
   if (isNaN(achievementNum) || isNaN(targetNum) || targetNum === 0) return 0;
   
-  // Calculate actual value
   return (achievementNum / 100) * targetNum;
 };
 
-// Helper function to check if target value is valid
-const isValidTargetValue = (targetValue, period) => {
+// Check if target value is valid (always true for date-based system)
+const isValidTargetValue = (targetValue) => {
   if (!targetValue) return false;
-  
-  // For 6 Months and 9 Months, check if the sum is greater than 0
-  if (period === "6 Months" || period === "9 Months") {
-    const numValue = parseFloat(targetValue.toString().trim());
-    return !isNaN(numValue) && numValue > 0;
-  }
-  
-  // For other periods, check if not empty or 0
-  const trimmed = targetValue.toString().trim();
-  return trimmed !== "" && trimmed !== "0" && trimmed !== "0.0" && trimmed !== "0.00";
+  const numValue = parseFloat(targetValue.toString().trim());
+  return !isNaN(numValue) && numValue > 0;
 };
 
 // Helper function to truncate text
@@ -317,18 +207,17 @@ const truncateText = (text, maxLength = 20) => {
 
 // Get progress color based on percentage
 const getProgressColor = (percentage) => {
-  if (percentage >= 90) return "#2e7d32"; // Green for excellent
-  if (percentage >= 75) return "#4caf50"; // Light green for good
-  if (percentage >= 60) return "#ff9800"; // Orange for average
-  if (percentage >= 40) return "#6a1b9a"; // Purple for needs attention
-  return "#d32f2f"; // Red for critical
+  if (percentage >= 90) return "#2e7d32";
+  if (percentage >= 75) return "#4caf50";
+  if (percentage >= 60) return "#ff9800";
+  if (percentage >= 40) return "#6a1b9a";
+  return "#d32f2f";
 };
 
 // ============================
-// REST OF YOUR EXISTING CODE
+// PERIOD OPTIONS
 // ============================
 
-// Period options with labels and descriptions
 const PERIOD_OPTIONS = [
   { value: "Yearly", label: "Yearly", color: "#2E7D32" },
   { value: "1ኛ ሩብዓመት", label: "Q1", color: "#1976d2" },
@@ -339,7 +228,7 @@ const PERIOD_OPTIONS = [
   { value: "9 Months", label: "9 Months", color: "#f57c00" },
 ];
 
-// Status configuration with better contrast colors
+// Status configuration
 const STATUS_CONFIG = {
   ACHIEVED: { 
     label: "Achieved", 
@@ -378,21 +267,16 @@ const STATUS_CONFIG = {
   },
 };
 
-// Helper function to get contrasting text color
+// Get contrasting text color
 const getContrastColor = (hexColor) => {
-  // Convert hex to RGB
   const r = parseInt(hexColor.substr(1, 2), 16);
   const g = parseInt(hexColor.substr(3, 2), 16);
   const b = parseInt(hexColor.substr(5, 2), 16);
-  
-  // Calculate luminance
   const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-  
-  // Return black for light colors, white for dark colors
   return luminance > 0.5 ? "#000000" : "#ffffff";
 };
 
-// Icons as text for no Material-UI
+// Icons as text
 const Icons = {
   ArrowBack: () => <span className="icon">←</span>,
   Download: () => <span className="icon">📥</span>,
@@ -437,21 +321,17 @@ export default function MinisterDashboard() {
   const [collapsedDepartments, setCollapsedDepartments] = useState(new Set());
   const [filteredDepartments, setFilteredDepartments] = useState([]);
   const [filterCategory, setFilterCategory] = useState(null);
-  // NEW STATE for analysis table tab within goal view
   const [goalViewTab, setGoalViewTab] = useState("chart");
-  // NEW STATE for showing period change notification
   const [showPeriodChangeNotification, setShowPeriodChangeNotification] = useState(false);
   const [periodChangeMessage, setPeriodChangeMessage] = useState("");
-
-  // Store raw data
   const [rawDepartments, setRawDepartments] = useState([]);
 
-  // UPDATED: Memoized progress calculation with issue parameter
+  // Memoized progress calculation
   const calculateProgress = useCallback((issue, period) => {
     return mapProgress(issue.done_ratio || 0, period, issue);
   }, []);
 
-  // Memoized status determination with text color
+  // Memoized status determination
   const getGoalStatus = useCallback((progress) => {
     let status;
     if (progress >= STATUS_CONFIG.ACHIEVED.threshold) {
@@ -466,14 +346,13 @@ export default function MinisterDashboard() {
       status = STATUS_CONFIG.INTERVENTION;
     }
     
-    // Ensure text color has good contrast
     return {
       ...status,
       textColor: getContrastColor(status.color)
     };
   }, []);
 
-  // Load data only once
+  // Load data - ONLY on initial mount - FIXED: No duplicate issues
   const loadData = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -488,35 +367,54 @@ export default function MinisterDashboard() {
 
       const mainProjects = await getMyMainProjects();
 
-      // Process departments in parallel
       const departmentPromises = mainProjects.map(async (dep, index) => {
         try {
-          const [goals, depIssues] = await Promise.all([
-            getSubprojects(dep.id).catch(() => []),
-            getProjectIssues({ project_id: dep.id, status_id: "*" }).catch(() => []),
-          ]);
+          // IMPORTANT FIX: Do NOT fetch issues from department projects
+          // Department projects should only serve as containers for goals
+          // Issues should only come from goal projects (subprojects)
+          
+          // Fetch department goals (subprojects)
+          const goals = await getSubprojects(dep.id).catch(() => []);
 
-          // Process goals in parallel
-          const goalsWithAllIssues = await Promise.all(
+          // Fetch and process issues for each goal ONLY
+          const goalsWithIssues = await Promise.all(
             goals.map(async (goal, goalIndex) => {
-              const issues = await getProjectIssues({ 
-                project_id: goal.id, 
-                status_id: "*" 
-              }).catch(() => []);
-              
-              return { 
-                ...goal, 
-                allIssues: issues, // Store ALL issues for each goal
-                displayName: `${String.fromCharCode(65 + goalIndex)}. ${goal.name}`
-              };
+              try {
+                // Fetch all issues for the goal project
+                const issuesRaw = await getProjectIssues({ 
+                  project_id: goal.id, 
+                  status_id: "*" 
+                }).catch(() => []);
+                
+                // Filter for top-level issues only
+                const topLevelIssues = filterTopLevelIssues(issuesRaw);
+                
+                return { 
+                  ...goal, 
+                  // Store both raw and filtered issues
+                  allIssues: issuesRaw,
+                  topLevelIssues: topLevelIssues,
+                  displayName: `${String.fromCharCode(65 + goalIndex)}. ${goal.name}`
+                };
+              } catch (err) {
+                console.error(`Error loading issues for goal ${goal.name}:`, err);
+                return {
+                  ...goal,
+                  allIssues: [],
+                  topLevelIssues: [],
+                  displayName: `${String.fromCharCode(65 + goalIndex)}. ${goal.name}`
+                };
+              }
             })
           );
 
           return {
             ...dep,
             displayName: `${index + 1}. ${dep.name}`,
-            goals: goalsWithAllIssues,
-            allDirectIssues: depIssues, // Store ALL department issues
+            goals: goalsWithIssues,
+            // IMPORTANT: Do NOT fetch issues from department project itself
+            // Only goals should have issues
+            directTopLevelIssues: [], // Empty array for department-level issues
           };
         } catch (err) {
           console.error(`Error loading department ${dep.name}:`, err);
@@ -524,15 +422,14 @@ export default function MinisterDashboard() {
             ...dep, 
             displayName: `${index + 1}. ${dep.name}`,
             goals: [], 
-            allDirectIssues: []
+            directTopLevelIssues: [] // Empty array
           };
         }
       });
 
       const allDepartmentData = await Promise.all(departmentPromises);
       setRawDepartments(allDepartmentData);
-      
-      // Apply initial period filter
+      // Apply the current period filter to the loaded data
       updateFilteredData(allDepartmentData, selectedPeriod);
       
     } catch (err) {
@@ -543,9 +440,9 @@ export default function MinisterDashboard() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [selectedPeriod]);
 
-  // Function to filter and calculate data based on selected period
+  // Filter and calculate data based on selected period - FIXED: No duplicate counting
   const updateFilteredData = useCallback((rawData, period) => {
     if (!rawData.length) {
       setDepartments([]);
@@ -562,95 +459,70 @@ export default function MinisterDashboard() {
       return;
     }
 
-    // Process each department for the selected period
     const processedDepartments = rawData.map((dep) => {
-      // Filter department issues by period
-      const filteredDepIssues = filterIssuesByPeriod(dep.allDirectIssues || [], period);
-      const depTopIssues = filteredDepIssues.filter((i) => !i.parent);
+      // No direct department issues - all issues come from goals
+      // So we skip filtering direct department issues
       
-      // Process goals for this period
+      // Process goals
       const goalsWithProgress = dep.goals.map((goal, goalIndex) => {
-        // Filter goal issues by period
-        const filteredGoalIssues = filterIssuesByPeriod(goal.allIssues || [], period);
-        const topIssues = filteredGoalIssues.filter((i) => !i.parent);
+        // Filter goal's top-level issues by period
+        const filteredGoalIssues = filterIssuesByPeriod(goal.topLevelIssues || [], period);
         
-        // Calculate weighted progress
-        let totalWeightedProgress = 0;
-        let totalWeight = 0;
+        let totalProgress = 0;
         
-        if (topIssues.length > 0) {
-          topIssues.forEach(issue => {
-            const weight = getWeight(issue);
+        if (filteredGoalIssues.length > 0) {
+          filteredGoalIssues.forEach(issue => {
             const progress = calculateProgress(issue, period);
-            totalWeightedProgress += progress * weight;
-            totalWeight += weight;
+            totalProgress += progress;
           });
+          totalProgress = Math.round(totalProgress / filteredGoalIssues.length);
         }
         
-        const progress = totalWeight > 0 ? Math.round(totalWeightedProgress / totalWeight) : 0;
-        const status = getGoalStatus(progress);
+        const status = getGoalStatus(totalProgress);
         
         return { 
           ...goal, 
-          progress, 
-          issues: topIssues, 
+          progress: totalProgress, 
+          issues: filteredGoalIssues, // Only top-level, period-filtered issues
           status,
           displayName: `${String.fromCharCode(65 + goalIndex)}. ${goal.name}`,
-          validIssuesCount: topIssues.length
+          validIssuesCount: filteredGoalIssues.length
         };
       });
 
-      // Calculate department progress with weighted average
-      let depWeightedProgress = 0;
-      let depTotalWeight = 0;
+      let depTotalProgress = 0;
+      let depIssueCount = 0;
       
-      if (depTopIssues.length > 0) {
-        depTopIssues.forEach(issue => {
-          const weight = getWeight(issue);
-          const progress = calculateProgress(issue, period);
-          depWeightedProgress += progress * weight;
-          depTotalWeight += weight;
-        });
-      }
-      
-      // Add goal issues to department calculation
+      // FIXED: Only count issues from goals, NOT from department itself
       goalsWithProgress.forEach(goal => {
         goal.issues.forEach(issue => {
-          const weight = getWeight(issue);
           const progress = calculateProgress(issue, period);
-          depWeightedProgress += progress * weight;
-          depTotalWeight += weight;
+          depTotalProgress += progress;
+          depIssueCount++;
         });
       });
       
-      const depProgress = depTotalWeight > 0 ? Math.round(depWeightedProgress / depTotalWeight) : 0;
-      
-      const totalValidIssues = depTopIssues.length + goalsWithProgress.reduce((sum, goal) => sum + goal.validIssuesCount, 0);
+      const depProgress = depIssueCount > 0 ? Math.round(depTotalProgress / depIssueCount) : 0;
+      const totalValidIssues = goalsWithProgress.reduce((sum, goal) => sum + goal.validIssuesCount, 0);
 
       return {
         ...dep,
         goals: goalsWithProgress,
         avgProgress: depProgress,
-        directIssues: depTopIssues,
+        directIssues: [], // Empty - no direct department issues
         validIssuesCount: totalValidIssues,
-        hasValidData: totalValidIssues > 0
+        hasValidData: totalValidIssues > 0 && depProgress > 0
       };
     });
 
-    // Filter out departments with no valid data for the selected period
     const validDepartments = processedDepartments.filter(dep => dep.hasValidData);
+    const sortedDepartments = [...validDepartments].sort((a, b) => b.avgProgress - a.avgProgress);
 
-    // Sort departments by progress
-    const sortedDepartments = [...validDepartments].sort(
-      (a, b) => b.avgProgress - a.avgProgress
-    );
-
-    // Calculate overall statistics using only valid departments
+    // FIXED: Collect all issues from goals only
     const allGoals = validDepartments.flatMap(dep => dep.goals);
-    const allIssues = validDepartments.flatMap(dep => [
-      ...dep.directIssues,
-      ...dep.goals.flatMap(goal => goal.issues)
-    ]);
+    const allIssues = validDepartments.flatMap(dep => 
+      dep.goals.flatMap(goal => goal.issues)
+    );
 
     const statusDistribution = allGoals.reduce((acc, goal) => {
       const status = goal.status.label;
@@ -675,71 +547,48 @@ export default function MinisterDashboard() {
 
     setBestDepartment(sortedDepartments[0] || null);
     setDepartments(sortedDepartments);
-    
-    // Clear any existing filters
     setFilteredDepartments([]);
     setFilterCategory(null);
   }, [calculateProgress, getGoalStatus]);
 
-  // Load data on mount only
+  // Load data ONLY on initial mount
   useEffect(() => {
     loadData();
-  }, [loadData]);
+  }, []); // Empty dependency array means this runs only once on mount
 
-  // Update filtered data when period changes
+  // Update when period changes - ONLY filter existing data
   useEffect(() => {
     if (rawDepartments.length > 0) {
       updateFilteredData(rawDepartments, selectedPeriod);
     }
   }, [selectedPeriod, rawDepartments, updateFilteredData]);
 
-  // Add function to handle category click
+  // Handlers
   const handleCategoryClick = useCallback((category) => {
     let filtered = [];
     
     switch(category) {
-      case 'total':
-        filtered = departments;
-        break;
-      case 'active':
-        filtered = departments.filter(d => d.avgProgress > 0 && d.avgProgress < 100);
-        break;
-      case 'completed':
-        filtered = departments.filter(d => d.avgProgress >= 95);
-        break;
-      case 'struggling':
-        filtered = departments.filter(d => d.avgProgress < 50);
-        break;
-      case 'excellent':
-        filtered = departments.filter(d => d.avgProgress >= 90);
-        break;
-      case 'good':
-        filtered = departments.filter(d => d.avgProgress >= 75 && d.avgProgress < 90);
-        break;
-      case 'average':
-        filtered = departments.filter(d => d.avgProgress >= 60 && d.avgProgress < 75);
-        break;
-      case 'poor':
-        filtered = departments.filter(d => d.avgProgress >= 40 && d.avgProgress < 60);
-        break;
-      case 'critical':
-        filtered = departments.filter(d => d.avgProgress < 40);
-        break;
-      default:
-        filtered = departments;
+      case 'total': filtered = departments; break;
+      case 'active': filtered = departments.filter(d => d.avgProgress > 0 && d.avgProgress < 100); break;
+      case 'completed': filtered = departments.filter(d => d.avgProgress >= 95); break;
+      case 'struggling': filtered = departments.filter(d => d.avgProgress < 50); break;
+      case 'excellent': filtered = departments.filter(d => d.avgProgress >= 90); break;
+      case 'good': filtered = departments.filter(d => d.avgProgress >= 75 && d.avgProgress < 90); break;
+      case 'average': filtered = departments.filter(d => d.avgProgress >= 60 && d.avgProgress < 75); break;
+      case 'poor': filtered = departments.filter(d => d.avgProgress >= 40 && d.avgProgress < 60); break;
+      case 'critical': filtered = departments.filter(d => d.avgProgress < 40); break;
+      default: filtered = departments;
     }
     
     setFilteredDepartments(filtered);
     setFilterCategory(category);
   }, [departments]);
 
-  // Add function to clear filter
   const clearFilter = useCallback(() => {
     setFilteredDepartments([]);
     setFilterCategory(null);
   }, []);
 
-  // Memoized handlers
   const handleDepartmentClick = useCallback((dep) => {
     setSelectedDepartmentId(dep.id);
     setSelectedGoalId(null);
@@ -748,11 +597,24 @@ export default function MinisterDashboard() {
     setGoalViewTab("chart");
   }, []);
 
-  const handleGoalClick = useCallback((goal) => {
-    setSelectedGoalId(goal.id);
-    setGoalIssues(goal.issues || []);
-    setGoalViewTab("chart"); // Reset to chart view when clicking a goal
-  }, []);
+  const handleGoalClick = useCallback((goal, departmentId = null) => {
+    if (departmentId && departmentId !== selectedDepartmentId) {
+      // If clicking from department list view, set department first
+      setSelectedDepartmentId(departmentId);
+      
+      // Use setTimeout to ensure department is set before selecting goal
+      setTimeout(() => {
+        setSelectedGoalId(goal.id);
+        setGoalIssues(goal.issues || []);
+        setGoalViewTab("chart");
+      }, 50);
+    } else {
+      // If already in department view, just select the goal
+      setSelectedGoalId(goal.id);
+      setGoalIssues(goal.issues || []);
+      setGoalViewTab("chart");
+    }
+  }, [selectedDepartmentId]);
 
   const handleBackToDepartments = useCallback(() => {
     setSelectedDepartmentId(null);
@@ -779,16 +641,14 @@ export default function MinisterDashboard() {
     });
   }, []);
 
-  // UPDATED: Handle period change - preserve current view
   const handlePeriodChange = useCallback((newPeriod) => {
     setSelectedPeriod(newPeriod);
-    // DO NOT reset selectedDepartmentId and selectedGoalId here
-    // They will be cleared by the useEffect if no data exists
     setActiveTab(0);
     setGoalViewTab("chart");
+    // Just update the period, the useEffect above will handle filtering
   }, []);
 
-  // Memoized data transformations
+  // Memoized data
   const selectedDepartment = useMemo(() => 
     departments.find(dep => dep.id === selectedDepartmentId),
     [departments, selectedDepartmentId]
@@ -799,73 +659,33 @@ export default function MinisterDashboard() {
     [selectedDepartment, selectedGoalId]
   );
 
-  // NEW: ዋና ተግባራት Analysis Table Data for selected goal
+  // Analysis table data for selected goal
   const goalAnalysisTableData = useMemo(() => {
     if (!selectedGoal || !selectedGoal.issues || selectedGoal.issues.length === 0) return [];
     
     const data = selectedGoal.issues.map(issue => {
-      const measurement = getField(issue, "መለኪያ") || "N/A";
       const targetValue = getTargetValue(issue, selectedPeriod);
       const achievement = mapProgress(issue.done_ratio || 0, selectedPeriod, issue);
-      const actual = calculateActualValue(achievement, targetValue, selectedPeriod);
+      const actual = calculateActualValue(achievement, targetValue);
       
       return {
         id: issue.id,
         subject: issue.subject,
-        measurement: measurement,
+        startDate: issue.start_date || "No start date",
+        dueDate: issue.due_date || "No due date",
         targetValue: targetValue,
         achievement: achievement,
         actual: actual,
         status: issue.status?.name || "Unknown",
-        
-        hasValidTarget: isValidTargetValue(targetValue, selectedPeriod),
-        weight: getWeight(issue)
+        hasValidTarget: isValidTargetValue(targetValue),
+        dateOverlap: calculateDateOverlap(issue.start_date, issue.due_date, selectedPeriod).toFixed(1),
+        isTopLevel: !issue.parent_id && !issue.parent
       };
     });
     
-    // Filter out issues with invalid target values
-    return data.filter(row => row.hasValidTarget);
+    // Only include top-level issues in analysis table
+    return data.filter(row => row.isTopLevel && row.hasValidTarget);
   }, [selectedGoal, selectedPeriod]);
-
-  // NEW: ዋና ተግባራት Analysis Table Data for selected department
-  const departmentAnalysisTableData = useMemo(() => {
-    if (!selectedDepartment) return [];
-    
-    // Combine department direct issues and all goal issues
-    const allIssues = [
-      ...(selectedDepartment.directIssues || []),
-      ...(selectedDepartment.goals?.flatMap(goal => goal.issues) || [])
-    ];
-    
-    if (allIssues.length === 0) return [];
-    
-    const data = allIssues.map(issue => {
-      const measurement = getField(issue, "መለኪያ") || "N/A";
-      const targetValue = getTargetValue(issue, selectedPeriod);
-      const achievement = mapProgress(issue.done_ratio || 0, selectedPeriod, issue);
-      const actual = calculateActualValue(achievement, targetValue, selectedPeriod);
-      const goal = selectedDepartment.goals?.find(g => 
-        g.issues?.some(i => i.id === issue.id)
-      );
-      
-      return {
-        id: issue.id,
-        subject: issue.subject,
-        measurement: measurement,
-        targetValue: targetValue,
-        achievement: achievement,
-        actual: actual,
-        status: issue.status?.name || "Unknown",
-        
-        goalName: goal?.displayName || "Direct Department Issue",
-        hasValidTarget: isValidTargetValue(targetValue, selectedPeriod),
-        weight: getWeight(issue)
-      };
-    });
-    
-    // Filter out issues with invalid target values
-    return data.filter(row => row.hasValidTarget);
-  }, [selectedDepartment, selectedPeriod]);
 
   const statusChartData = useMemo(() => 
     Object.entries(stats.statusDistribution).map(([name, value]) => {
@@ -880,7 +700,6 @@ export default function MinisterDashboard() {
     [stats.statusDistribution]
   );
 
-  // Calculate department performance categories
   const departmentPerformance = useMemo(() => {
     if (!departments.length) return { excellent: 0, good: 0, average: 0, poor: 0, critical: 0 };
     
@@ -893,19 +712,16 @@ export default function MinisterDashboard() {
     };
   }, [departments]);
 
-  // Check if current selected department/goal has data for new period
+  // Check if current selection has data for new period
   useEffect(() => {
     if (!selectedDepartmentId) return;
     
-    // Find the selected department in the updated departments list
     const currentDept = departments.find(dep => dep.id === selectedDepartmentId);
     
     if (!currentDept) {
-      // Department doesn't have valid data for this period
       setPeriodChangeMessage(`The selected department has no valid data for ${selectedPeriod}. Returning to department list.`);
       setShowPeriodChangeNotification(true);
       
-      // Clear selection after a delay
       const timer = setTimeout(() => {
         setSelectedDepartmentId(null);
         setSelectedGoalId(null);
@@ -917,19 +733,15 @@ export default function MinisterDashboard() {
     }
   }, [departments, selectedDepartmentId, selectedPeriod]);
 
-  // FIXED: This useEffect needs to check if selectedDepartment exists first
   useEffect(() => {
     if (!selectedGoalId || !selectedDepartment) return;
     
-    // Find the selected goal in the updated department's goals
     const currentGoal = selectedDepartment.goals?.find(g => g.id === selectedGoalId);
     
     if (!currentGoal) {
-      // Goal doesn't have valid data for this period
       setPeriodChangeMessage(`The selected goal has no valid data for ${selectedPeriod}. Returning to department view.`);
       setShowPeriodChangeNotification(true);
       
-      // Clear selection after a delay
       const timer = setTimeout(() => {
         setSelectedGoalId(null);
         setGoalIssues([]);
@@ -940,7 +752,7 @@ export default function MinisterDashboard() {
     }
   }, [selectedGoalId, selectedDepartment, selectedPeriod]);
 
-  // Custom tooltip component with period info
+  // Custom tooltip component
   const CustomTooltip = ({ active, payload, label }) => {
     if (active && payload && payload.length) {
       const data = payload[0].payload;
@@ -950,33 +762,31 @@ export default function MinisterDashboard() {
           <p className="tooltip-value">Progress: {payload[0].value}%</p>
           <p className="tooltip-period">Period: {selectedPeriod}</p>
           {data.validIssuesCount !== undefined && (
-            <p className="tooltip-issues">Valid ዋና ተግባራት: {data.validIssuesCount}</p>
+            <p className="tooltip-issues">Valid Issues: {data.validIssuesCount}</p>
           )}
+          <p className="tooltip-note">Showing top-level issues only</p>
         </div>
       );
     }
     return null;
   };
 
-  // Custom tooltip for issues
   const IssueTooltip = ({ active, payload, label }) => {
     if (active && payload && payload.length) {
       const data = payload[0].payload;
-      const validQuartersCount = countValidQuarters(data);
+      const dateOverlap = calculateDateOverlap(data.start_date, data.due_date, selectedPeriod);
       
       return (
         <div className="custom-tooltip">
           <p className="tooltip-label"><strong>{data.subject}</strong></p>
           <p className="tooltip-value">Progress: {payload[0].value}%</p>
           <p className="tooltip-period">Period: {selectedPeriod}</p>
-          {selectedPeriod.includes("ሩብዓመት") && validQuartersCount > 0 && (
-            <p className="tooltip-quarter-info">
-              Quarter Distribution: {validQuartersCount} valid quarter(s)
-            </p>
-          )}
-          {data.weight && (
-            <p className="tooltip-weight">Weight: {data.weight}</p>
-          )}
+          <p className="tooltip-dates">
+            Dates: {data.start_date ? new Date(data.start_date).toLocaleDateString() : "No start"} - 
+            {data.due_date ? new Date(data.due_date).toLocaleDateString() : "No due"}
+          </p>
+          <p className="tooltip-overlap">Date Overlap: {dateOverlap.toFixed(1)}%</p>
+          <p className="tooltip-note">Top-level issue (no parent)</p>
         </div>
       );
     }
@@ -988,21 +798,21 @@ export default function MinisterDashboard() {
     return getProgressColor(progress);
   };
 
-  // Render ዋና ተግባራት Analysis Table component
+  // Render Analysis Table component (only for goals now)
   const renderAnalysisTable = (tableData, title, showGoalColumn = false) => {
     return (
       <div className="analysis-table-container">
         <h3>{title} ({selectedPeriod})</h3>
+        <div className="table-note">
+          <span className="note-icon">ℹ️</span>
+          Showing only top-level issues (issues without parent issues)
+        </div>
         
         {tableData.length === 0 ? (
           <div className="no-data-message">
-            <p>No ዋና ተግባራት with valid target values for {selectedPeriod}</p>
+            <p>No top-level issues with valid date ranges for {selectedPeriod}</p>
             <p className="hint">
-              {selectedPeriod === "6 Months" 
-                ? "Issues must have valid values in either '1ኛ ሩብዓመት' or '2ኛ ሩብዓመት'"
-                : selectedPeriod === "9 Months"
-                ? "Issues must have valid values in either '1ኛ ሩብዓመት', '2ኛ ሩብዓመት', or '3ኛ ሩብዓመት'"
-                : "Issues with empty or 0 target values are not shown in this table"}
+              Issues must have both start and due dates that overlap with the selected period and be top-level (no parent issues)
             </p>
           </div>
         ) : (
@@ -1010,19 +820,15 @@ export default function MinisterDashboard() {
             <table className="analysis-table">
               <thead>
                 <tr>
-                  <th>ዋና ተግባራት</th>
-                  <th>መለኪያ</th>
+                  <th>Issue</th>
+                  <th>Start Date</th>
+                  <th>Due Date</th>
                   {showGoalColumn && <th>Goal</th>}
-                  <th>
-                    {selectedPeriod === "Yearly" ? "የዓመቱ እቅድ" : selectedPeriod} Target
-                    {selectedPeriod === "6 Months" && <div className="table-subtitle">(Sum of Q1 + Q2)</div>}
-                    {selectedPeriod === "9 Months" && <div className="table-subtitle">(Sum of Q1 + Q2 + Q3)</div>}
-                  </th>
+                  <th>Target Value</th>
                   <th>Achievement (%)</th>
                   <th>Actual Value</th>
-                  <th>Weight</th>
-                 
-                 
+                  <th>Date Overlap</th>
+                  <th>Status</th>
                 </tr>
               </thead>
               <tbody>
@@ -1031,7 +837,8 @@ export default function MinisterDashboard() {
                     <td className="subject-cell" title={row.subject}>
                       {truncateText(row.subject, 40)}
                     </td>
-                    <td>{row.measurement}</td>
+                    <td>{row.startDate}</td>
+                    <td>{row.dueDate}</td>
                     {showGoalColumn && <td>{truncateText(row.goalName, 20)}</td>}
                     <td className="target-cell">
                       {row.targetValue}
@@ -1047,18 +854,19 @@ export default function MinisterDashboard() {
                     <td className="actual-cell">
                       {row.actual.toFixed(2)}
                     </td>
-                    <td className="weight-cell">
-                      {row.weight}
+                    <td className="overlap-cell">
+                      {row.dateOverlap}%
                     </td>
-                   
-                    
+                    <td>
+                      <span className="status-badge">{row.status}</span>
+                    </td>
                   </tr>
                 ))}
               </tbody>
               <tfoot>
                 <tr className="table-footer">
-                  <td colSpan={showGoalColumn ? 3 : 2} className="footer-label">
-                    <strong>Total</strong>
+                  <td colSpan={showGoalColumn ? 4 : 3} className="footer-label">
+                    <strong>Total/Average</strong>
                   </td>
                   <td className="footer-value">
                     <strong>
@@ -1081,17 +889,17 @@ export default function MinisterDashboard() {
                   </td>
                   <td className="footer-value">
                     <strong>
-                      {tableData.reduce((sum, row) => sum + row.weight, 0)}
+                      {tableData.length > 0 
+                        ? (tableData.reduce((sum, row) => sum + parseFloat(row.dateOverlap), 0) / tableData.length).toFixed(1)
+                        : 0}%
                     </strong>
                   </td>
-                  <td colSpan={2} className="footer-count">
-                    <strong>{tableData.length} ዋና </strong>
+                  <td className="footer-count">
+                    <strong>{tableData.length} top-level issues</strong>
                   </td>
                 </tr>
               </tfoot>
             </table>
-            
-          
           </div>
         )}
       </div>
@@ -1124,9 +932,9 @@ export default function MinisterDashboard() {
   if (departments.length === 0 && rawDepartments.length > 0) {
     return (
       <div className="info-alert">
-        <p>No departments with valid data for {selectedPeriod}. Try selecting a different period.</p>
+        <p>No departments with valid top-level issue data for {selectedPeriod}. Try selecting a different period.</p>
         <div className="period-note">
-          <p><strong>Note:</strong> Showing 0 of {rawDepartments.length} departments with valid {selectedPeriod === "Yearly" ? "የዓመቱ እቅድ" : selectedPeriod} values</p>
+          <p><strong>Note:</strong> Only top-level issues (no parent) with both start and due dates overlapping the selected period are shown</p>
         </div>
         <div className="period-selector-container">
           <label>Change Period:</label>
@@ -1148,35 +956,21 @@ export default function MinisterDashboard() {
 
   return (
     <div className="dashboard-container">
-      {/* Header */}
+      {/* Header - Simplified */}
       <div className="dashboard-header">
         <div className="header-left">
           <h1>Minister Dashboard</h1>
-          <p className="subtitle">Overview of departmental performance and goal progress</p>
+          <p className="subtitle">Overview of departmental performance based on top-level issue dates</p>
           <div className="period-info">
             <span className="period-badge" style={{ backgroundColor: PERIOD_OPTIONS.find(p => p.value === selectedPeriod)?.color }}>
               {selectedPeriod}
             </span>
             <span className="valid-departments">
-              Showing {departments.length} of {rawDepartments.length} departments with valid data
+              Showing {departments.length} of {rawDepartments.length} departments with valid top-level issues
             </span>
           </div>
         </div>
         <div className="header-controls">
-          <div className="period-selector">
-            <label>Period:</label>
-            <select
-              value={selectedPeriod}
-              onChange={(e) => handlePeriodChange(e.target.value)}
-              className="period-select"
-            >
-              {PERIOD_OPTIONS.map(option => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </div>
           <button className="refresh-button" onClick={loadData}>
             <Icons.Refresh /> Refresh Data
           </button>
@@ -1199,27 +993,7 @@ export default function MinisterDashboard() {
         </div>
       )}
 
-      {/* Period Info Banner */}
-      <div className="period-info-banner">
-        <div className="period-info-content">
-          <div>
-            <strong>Selected Period:</strong> {selectedPeriod}
-            {selectedPeriod === "Yearly" && " (የዓመቱ እቅድ)"}
-            {selectedPeriod === "6 Months" && " (1ኛ ሩብዓመት + 2ኛ ሩብዓመት)"}
-            {selectedPeriod === "9 Months" && " (1ኛ ሩብዓመት + 2ኛ ሩብዓመት + 3ኛ ሩብዓመት)"}
-          </div>
-          <div className="current-view-info">
-            {selectedDepartment && (
-              <span className="current-view">
-                Viewing: {selectedDepartment.displayName}
-                {selectedGoal && ` > ${selectedGoal.displayName}`}
-              </span>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Statistics Cards - Show only when not viewing department/goal details */}
+      {/* Statistics Cards */}
       {!selectedDepartmentId && !selectedGoalId && (
         <div className="stats-grid">
           <div className="stat-card">
@@ -1230,7 +1004,7 @@ export default function MinisterDashboard() {
           <div className="stat-card">
             <div className="stat-label">Valid Goals</div>
             <div className="stat-value">{stats.totalGoals}</div>
-            <div className="stat-subtext">with period data</div>
+            <div className="stat-subtext">with top-level issues</div>
           </div>
           <div className="stat-card">
             <div className="stat-label">Weighted Progress</div>
@@ -1238,36 +1012,14 @@ export default function MinisterDashboard() {
             <div className="stat-subtext">Overall average</div>
           </div>
           <div className="stat-card">
-            <div className="stat-label">Valid ዋና ተግባራት</div>
+            <div className="stat-label">Top-Level Issues</div>
             <div className="stat-value issues">{stats.totalIssues}</div>
-            <div className="stat-subtext">with period values</div>
+            <div className="stat-subtext">no parent issues</div>
           </div>
         </div>
       )}
 
-      {/* Best Performer - Show only when not viewing department/goal details */}
-      {bestDepartment && !selectedDepartmentId && !selectedGoalId && (
-        <div className="best-performer">
-          <div className="best-performer-content">
-            <div className="best-performer-left">
-              <h3><span className="trophy">🏆</span> Best Performing Department ({selectedPeriod})</h3>
-              <h2>{bestDepartment.displayName}</h2>
-              <p>Weighted Progress: <strong>{bestDepartment.avgProgress}%</strong></p>
-              <p className="best-performer-subtext">
-                
-              </p>
-            </div>
-            <button 
-              className="view-details-button"
-              onClick={() => handleDepartmentClick(bestDepartment)}
-            >
-              View Details
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Main Content Tabs - Show only when not viewing department/goal details */}
+      {/* Main Content Tabs */}
       {!selectedDepartmentId && !selectedGoalId && (
         <>
           <div className="tabs">
@@ -1287,7 +1039,46 @@ export default function MinisterDashboard() {
 
           {activeTab === 0 && (
             <div className="chart-card">
-              <h3>Department Performance ({selectedPeriod})</h3>
+              <div className="chart-header-with-period">
+                <h3>Department Performance ({selectedPeriod})</h3>
+                <div className="tab-period-selector">
+                  <label>View for period:</label>
+                  <select
+                    value={selectedPeriod}
+                    onChange={(e) => handlePeriodChange(e.target.value)}
+                    className="period-select"
+                  >
+                    {PERIOD_OPTIONS.map(option => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              
+              {/* Best Performer Inside Department Progress Tab */}
+              {bestDepartment && (
+                <div className="best-performer-in-tab">
+                  <div className="best-performer-content">
+                    <div className="best-performer-left">
+                      <h3><span className="trophy">🏆</span> Best Performing Department</h3>
+                      <h2>{bestDepartment.displayName}</h2>
+                      <p>Date-based Progress: <strong>{bestDepartment.avgProgress}%</strong></p>
+                      <p className="best-performer-subtext">
+                        Based on {bestDepartment.validIssuesCount} top-level issues
+                      </p>
+                    </div>
+                    <button 
+                      className="view-details-button"
+                      onClick={() => handleDepartmentClick(bestDepartment)}
+                    >
+                      View Details
+                    </button>
+                  </div>
+                </div>
+              )}
+              
               <div className="chart-container">
                 {departments.length > 0 ? (
                   <ResponsiveContainer width="100%" height={500}>
@@ -1350,7 +1141,7 @@ export default function MinisterDashboard() {
                   </ResponsiveContainer>
                 ) : (
                   <div className="no-data-message">
-                    <p>No departments have valid data for {selectedPeriod}</p>
+                    <p>No departments have top-level issues overlapping with {selectedPeriod}</p>
                     <p className="hint">Try selecting a different period</p>
                   </div>
                 )}
@@ -1360,7 +1151,23 @@ export default function MinisterDashboard() {
 
           {activeTab === 1 && (
             <div className="chart-card">
-              <h3>Goal Status Distribution ({selectedPeriod})</h3>
+              <div className="chart-header-with-period">
+                <h3>Goal Status Distribution ({selectedPeriod})</h3>
+                <div className="tab-period-selector">
+                  <label>View for period:</label>
+                  <select
+                    value={selectedPeriod}
+                    onChange={(e) => handlePeriodChange(e.target.value)}
+                    className="period-select"
+                  >
+                    {PERIOD_OPTIONS.map(option => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
               <div className="status-grid">
                 <div className="pie-chart-container">
                   {statusChartData.length > 0 ? (
@@ -1415,9 +1222,9 @@ export default function MinisterDashboard() {
                         <div 
                           key={goal.id}
                           className="goal-item"
-                          onClick={() => {
-                            handleDepartmentClick(department);
-                            setTimeout(() => handleGoalClick(goal), 100);
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleGoalClick(goal, department.id);
                           }}
                         >
                           <span className="goal-name">
@@ -1459,9 +1266,9 @@ export default function MinisterDashboard() {
               <h2>{selectedDepartment.displayName}</h2>
               <p>Department Goals and Progress ({selectedPeriod})</p>
               <div className="department-stats">
-                <span className="department-stat">Weighted Progress: <strong>{selectedDepartment.avgProgress}%</strong></span>
+                <span className="department-stat">Date-based Progress: <strong>{selectedDepartment.avgProgress}%</strong></span>
                 <span className="department-stat">Valid Goals: <strong>{selectedDepartment.goals?.length || 0}</strong></span>
-                <span className="department-stat">Valid Issues: <strong>{selectedDepartment.validIssuesCount}</strong></span>
+                <span className="department-stat">Top-Level Issues: <strong>{selectedDepartment.validIssuesCount}</strong></span>
               </div>
             </div>
           </div>
@@ -1495,7 +1302,7 @@ export default function MinisterDashboard() {
                           transform={`rotate(-45, ${x}, ${y + 15})`}
                           textAnchor="end"
                           className="chart-xaxis-label"
-                          onClick={() => handleGoalClick(goal)}
+                          onClick={() => handleGoalClick(goal, selectedDepartment.id)}
                         >
                           {payload.value.length > 25
                             ? payload.value.substring(0, 22) + "..."
@@ -1508,7 +1315,7 @@ export default function MinisterDashboard() {
                   <Bar
                     dataKey="progress"
                     cursor="pointer"
-                    onClick={(data) => handleGoalClick(data)}
+                    onClick={(data) => handleGoalClick(data, selectedDepartment.id)}
                     radius={[4, 4, 0, 0]}
                     stroke="#ffffff"
                     strokeWidth={1}
@@ -1535,18 +1342,7 @@ export default function MinisterDashboard() {
             </div>
           ) : (
             <div className="no-data">
-              <p>No goals with valid data for {selectedPeriod}.</p>
-            </div>
-          )}
-
-          {/* Department ዋና ተግባራት Analysis Table */}
-          {selectedDepartment && (
-            <div className="analysis-table-section">
-              {renderAnalysisTable(
-                departmentAnalysisTableData, 
-                `${selectedDepartment.displayName} - ዋና ተግባራት Analysis`,
-                true // Show goal column for department view
-              )}
+              <p>No goals with top-level issues overlapping {selectedPeriod}.</p>
             </div>
           )}
         </div>
@@ -1573,10 +1369,10 @@ export default function MinisterDashboard() {
                   {selectedGoal.status.label}
                 </span>
                 <span className="goal-progress-text">
-                  Weighted Progress: {selectedGoal.progress}%
+                  Date-based Progress: {selectedGoal.progress}%
                 </span>
                 <span className="goal-issues-count">
-                  Valid Issues: {selectedGoal.issues.length}
+                  Top-Level Issues: {selectedGoal.issues.length}
                 </span>
               </div>
             </div>
@@ -1594,7 +1390,7 @@ export default function MinisterDashboard() {
               className={`goal-tab ${goalViewTab === 'table' ? 'active' : ''}`}
               onClick={() => setGoalViewTab('table')}
             >
-              <Icons.Target /> ዋና ተግባራት Analysis Table
+              <Icons.Target /> Date-based Analysis Table
             </button>
           </div>
 
@@ -1608,7 +1404,6 @@ export default function MinisterDashboard() {
                       data={goalIssues.map((issue) => ({
                         ...issue,
                         progress: calculateProgress(issue, selectedPeriod),
-                        weight: getWeight(issue),
                       }))}
                       margin={{ top: 20, right: 30, left: 250, bottom: 5 }}
                     >
@@ -1668,76 +1463,24 @@ export default function MinisterDashboard() {
                 </div>
               ) : (
                 <div className="no-data">
-                  <p>No valid ዋና ተግባራት found for this goal ({selectedPeriod}).</p>
+                  <p>No top-level issues with date overlaps for this goal ({selectedPeriod}).</p>
                 </div>
               )}
             </>
           ) : (
             <>
-              {/* Goal ዋና ተግባራት Analysis Table */}
+              {/* Goal Analysis Table */}
               {renderAnalysisTable(
                 goalAnalysisTableData, 
-                `${selectedGoal.displayName} - ዋና ተግባራት Analysis`,
-                false // Don't show goal column for goal view
+                `${selectedGoal.displayName} - Top-Level Issues Analysis`,
+                false
               )}
             </>
           )}
         </div>
       )}
 
-      {/* Filtered Departments Modal */}
-      {filteredDepartments.length > 0 && (
-        <div className="filtered-departments-modal">
-          <div className="modal-header">
-            <h3>
-              {filterCategory === 'total' && 'All Departments'}
-              {filterCategory === 'active' && 'Active Departments'}
-              {filterCategory === 'completed' && 'Completed Departments'}
-              {filterCategory === 'struggling' && 'Departments Needing Help'}
-              {filterCategory === 'excellent' && 'Excellent Departments (≥90%)'}
-              {filterCategory === 'good' && 'Good Departments (75-89%)'}
-              {filterCategory === 'average' && 'Average Departments (60-74%)'}
-              {filterCategory === 'poor' && 'Departments Needing Attention (40-59%)'}
-              {filterCategory === 'critical' && 'Critical Departments (<40%)'}
-              <span className="department-count"> ({filteredDepartments.length})</span>
-            </h3>
-            <button className="close-button" onClick={clearFilter}>
-              × Close
-            </button>
-          </div>
-          <div className="filtered-departments-list">
-            {filteredDepartments.map(department => (
-              <div 
-                key={department.id}
-                className="filtered-department-item"
-                onClick={() => handleDepartmentClick(department)}
-              >
-                <div className="department-info">
-                  <h4>{department.displayName}</h4>
-                  <p className="department-progress-text">
-                    Weighted Progress: <strong>{department.avgProgress}%</strong>
-                  </p>
-                  
-                </div>
-                <div className="department-status">
-                  <span 
-                    className="status-badge"
-                    style={{ 
-                      backgroundColor: getGoalStatus(department.avgProgress).color,
-                      color: getGoalStatus(department.avgProgress).textColor
-                    }}
-                  >
-                    {getGoalStatus(department.avgProgress).label}
-                  </span>
-                  <span className="arrow-icon">→</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Department Performance Summary Box - Show only when not viewing department/goal details */}
+      {/* Department Performance Summary Box */}
       {!selectedDepartmentId && !selectedGoalId && departments.length > 0 && (
         <div className="department-summary-box">
           <div className="summary-header">
@@ -1859,7 +1602,7 @@ export default function MinisterDashboard() {
       <div className="dashboard-footer">
         <p>
           Last updated: {new Date().toLocaleString()} • Data period: {selectedPeriod} • 
-          
+          Showing only top-level issues (no parent issues) with valid date overlaps
         </p>
       </div>
     </div>

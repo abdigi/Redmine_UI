@@ -79,7 +79,8 @@ export default function ProgressPage() {
     
     // Remove any non-numeric characters except decimal point and minus sign
     const cleaned = value.replace(/[^\d.-]/g, '');
-    return parseFloat(cleaned) || 0;
+    const result = parseFloat(cleaned);
+    return isNaN(result) ? 0 : result;
   };
 
   const customFieldNames = [
@@ -199,33 +200,29 @@ export default function ProgressPage() {
   const calculatePerformance = () => {
     if (!quarterValue || !selectedIssue) return;
     
-    // Parse quarter value - remove any non-numeric characters except decimal point
+    // Parse quarter value - allow 0
     const quarterTargetStr = quarterValue.toString().replace(/[^\d.-]/g, '');
-    const quarterTarget = parseFloat(quarterTargetStr) || 0;
-    
-    // Get annual plan as a number
+    const quarterTarget = parseFloat(quarterTargetStr);
     const annualPlan = getCustomFieldAsNumber(selectedIssue, "የዓመቱ እቅድ");
-    const currentDoneRatio = selectedIssue.done_ratio || 0;
     
     console.log("Calculation values:", {
       quarterTarget,
       annualPlan,
-      currentDoneRatio,
-      quarterValueInput: quarterValue
+      quarterValueInput: quarterValue,
+      isQuarterTargetZero: quarterTarget === 0
     });
     
-    if (annualPlan > 0 && quarterTarget > 0) {
+    // Allow 0 as valid input
+    if (annualPlan > 0 && !isNaN(quarterTarget)) {
       // Formula: (quarter_input_value × 100) / annual_plan
-      const newPercent = (quarterTarget * 100) / annualPlan;
-      console.log("New percent calculated:", newPercent);
-      setCalculatedPercent(newPercent);
+      const quarterPercent = (quarterTarget * 100) / annualPlan;
+      console.log("Quarter percent calculated:", quarterPercent);
       
-      // Calculate new done ratio: current_done_ratio + new_percent
-      const totalDoneRatio = Math.min(currentDoneRatio + newPercent, 100);
-      console.log("Total done ratio:", totalDoneRatio);
-      setNewDoneRatio(Math.round(totalDoneRatio));
+      // Simply use the calculated percentage as the new done ratio
+      setCalculatedPercent(quarterPercent);
+      setNewDoneRatio(Math.min(Math.round(quarterPercent), 100));
     } else {
-      // Reset if invalid values
+      // Reset if invalid values (annual plan must be > 0)
       setCalculatedPercent(0);
       setNewDoneRatio(0);
     }
@@ -233,13 +230,14 @@ export default function ProgressPage() {
 
   // Add a useEffect to recalculate when quarterValue changes
   useEffect(() => {
-    if (selectedIssue && quarterValue) {
+    if (selectedIssue && quarterValue !== "") {
       calculatePerformance();
     }
   }, [quarterValue, selectedIssue]);
 
   const handleSavePerformance = () => {
-    if (!selectedIssue || !selectedQuarter || !quarterValue || newDoneRatio === 0) return;
+    // Allow saving even if newDoneRatio is 0
+    if (!selectedIssue || !selectedQuarter || quarterValue === "" || newDoneRatio === undefined) return;
     
     handleProgressChange(selectedIssue.id, newDoneRatio);
     
@@ -600,7 +598,6 @@ export default function ProgressPage() {
             }}>
               <div><strong>Annual Plan:</strong> {getCustomField(selectedIssue, "የዓመቱ እቅድ")} (Value: {getCustomFieldAsNumber(selectedIssue, "የዓመቱ እቅድ")})</div>
               <div><strong>Current Done Ratio:</strong> {selectedIssue.done_ratio || 0}%</div>
-              <div><strong>Current Quarter Progress:</strong> {mapFromQuarterRange(selectedQuarter, selectedIssue.done_ratio || 0)}%</div>
             </div>
             
             <div style={{ marginBottom: "15px" }}>
@@ -629,14 +626,14 @@ export default function ProgressPage() {
                   fontSize: "16px",
                   boxSizing: "border-box",
                 }}
-                placeholder="Enter achievement value for this quarter"
+                placeholder="Enter achievement value for this quarter (0 is allowed)"
               />
               <div style={{ fontSize: "12px", color: "#666", marginTop: "5px" }}>
-                Enter numeric value (e.g., 1000 or 1000.50)
+                Enter numeric value (e.g., 0, 1000, or 1000.50)
               </div>
             </div>
             
-            {quarterValue && calculatedPercent > 0 && (
+            {quarterValue !== "" && !isNaN(parseFloat(quarterValue.replace(/[^\d.-]/g, ''))) && (
               <div style={{
                 marginBottom: "20px",
                 padding: "15px",
@@ -650,9 +647,15 @@ export default function ProgressPage() {
                 <div style={{ fontSize: "14px", color: "#666", marginBottom: "5px" }}>
                   <div>Quarter Achievement: {quarterValue}</div>
                   <div>Annual Plan: {getCustomFieldAsNumber(selectedIssue, "የዓመቱ እቅድ")}</div>
-                  <div style={{ margin: "5px 0" }}>
-                    ({quarterValue} × 100) ÷ {getCustomFieldAsNumber(selectedIssue, "የዓመቱ እቅድ")} = <strong>{calculatedPercent.toFixed(2)}%</strong>
-                  </div>
+                  {getCustomFieldAsNumber(selectedIssue, "የዓመቱ እቅድ") > 0 ? (
+                    <div style={{ margin: "5px 0" }}>
+                      ({quarterValue} × 100) ÷ {getCustomFieldAsNumber(selectedIssue, "የዓመቱ እቅድ")} = <strong>{calculatedPercent.toFixed(2)}%</strong>
+                    </div>
+                  ) : (
+                    <div style={{ margin: "5px 0", color: "#f44336" }}>
+                      Cannot calculate: Annual plan must be greater than 0
+                    </div>
+                  )}
                 </div>
                 
                 <div style={{ 
@@ -661,24 +664,34 @@ export default function ProgressPage() {
                   borderTop: "1px dashed #ddd" 
                 }}>
                   <div style={{ fontSize: "14px", marginBottom: "5px" }}>
-                    <strong>Adding to Current Progress:</strong>
+                    <strong>Setting New Done Ratio:</strong>
                   </div>
                   <div style={{ fontSize: "14px", color: "#666" }}>
-                    Current: {selectedIssue.done_ratio || 0}% + New: {calculatedPercent.toFixed(2)}% = {Math.min((selectedIssue.done_ratio || 0) + calculatedPercent, 100).toFixed(2)}%
+                    Calculated: {calculatedPercent.toFixed(2)}% → Rounded: {newDoneRatio}%
                   </div>
                   <div style={{ 
                     fontSize: "14px", 
-                    color: "#4CAF50",
+                    color: newDoneRatio === 0 ? "#666" : "#4CAF50",
                     fontWeight: "bold",
                     marginTop: "5px"
                   }}>
                     New Done Ratio: {newDoneRatio}%
                   </div>
+                  <div style={{ 
+                    fontSize: "12px", 
+                    color: "#666",
+                    fontStyle: "italic",
+                    marginTop: "5px"
+                  }}>
+                    {newDoneRatio === 0 ? 
+                      "(This will set done ratio to 0%)" : 
+                      `(This will replace the current done ratio of ${selectedIssue.done_ratio || 0}%)`}
+                  </div>
                 </div>
               </div>
             )}
             
-            {quarterValue && calculatedPercent === 0 && (
+            {quarterValue !== "" && (isNaN(parseFloat(quarterValue.replace(/[^\d.-]/g, ''))) || getCustomFieldAsNumber(selectedIssue, "የዓመቱ እቅድ") <= 0) && (
               <div style={{
                 marginBottom: "20px",
                 padding: "15px",
@@ -692,9 +705,8 @@ export default function ProgressPage() {
                 <div style={{ fontSize: "14px", color: "#666", marginTop: "5px" }}>
                   Please check if:
                   <ul style={{ marginLeft: "20px", marginTop: "5px" }}>
-                    <li>Quarter achievement value is valid</li>
+                    <li>Quarter achievement value is valid number</li>
                     <li>Annual plan value is greater than 0</li>
-                    <li>All values are numeric</li>
                   </ul>
                 </div>
               </div>
@@ -725,20 +737,22 @@ export default function ProgressPage() {
               
               <button
                 onClick={handleSavePerformance}
-                disabled={!quarterValue || newDoneRatio === 0}
+                disabled={quarterValue === "" || isNaN(parseFloat(quarterValue.replace(/[^\d.-]/g, '')))}
                 style={{
                   padding: "10px 20px",
-                  backgroundColor: newDoneRatio > 0 ? "#4CAF50" : "#ccc",
+                  backgroundColor: quarterValue !== "" ? "#4CAF50" : "#ccc",
                   color: "white",
                   border: "none",
                   borderRadius: "4px",
-                  cursor: newDoneRatio > 0 ? "pointer" : "not-allowed",
-                  opacity: newDoneRatio > 0 ? 1 : 0.6,
+                  cursor: quarterValue !== "" ? "pointer" : "not-allowed",
+                  opacity: quarterValue !== "" ? 1 : 0.6,
                   fontSize: "14px",
                   fontWeight: "bold",
                 }}
               >
-                Save Performance ({selectedIssue.done_ratio || 0}% → {newDoneRatio}%)
+                {newDoneRatio === 0 ? 
+                  `Set to 0% (from ${selectedIssue.done_ratio || 0}%)` : 
+                  `Save Performance (${selectedIssue.done_ratio || 0}% → ${newDoneRatio}%)`}
               </button>
             </div>
           </div>
