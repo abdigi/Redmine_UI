@@ -116,7 +116,7 @@ export default function Sidebar() {
   if (role === "Team Leaders") {
     menuItems = [
       { name: "Dashboard", path: "/teamleader-dashboard", icon: Icons.Dashboard },
-      { name: "Personal Plan Management", path: "/personal-plan-management", icon: Icons.Task },
+      { name: "Personal Plan", path: "/personal-plan-management", icon: Icons.Task },
       
     ];
   } else if (role === "Executives") {
@@ -133,7 +133,7 @@ export default function Sidebar() {
     // default for other roles
     menuItems = [
       { name: "Dashboard", path: "/dashboard", icon: Icons.Dashboard },
-      { name: "Personal Plan Management", path: "/personal-plan-management", icon: Icons.Task },
+      { name: "Personal Plan", path: "/personal-plan-management", icon: Icons.Task },
       
       { name: "Progress", path: "/progress-page", icon: Icons.Progress },
     ];

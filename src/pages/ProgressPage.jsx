@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { 
-  getIssuesCreatedByUser, 
+  getIssuesAssignedToMe,
   updateIssue, 
   getCurrentUser,
   getIssue 
@@ -16,9 +16,24 @@ export default function ProgressPage() {
   const [quarterValue, setQuarterValue] = useState("");
   const [calculatedPercent, setCalculatedPercent] = useState(0);
   const [newDoneRatio, setNewDoneRatio] = useState(0);
+  const [loadingDots, setLoadingDots] = useState("");
   
   const today = new Date();
 
+  // Animation for loading dots
+  useEffect(() => {
+    if (loading) {
+      const interval = setInterval(() => {
+        setLoadingDots(prev => {
+          if (prev.length >= 3) return "";
+          return prev + ".";
+        });
+      }, 500);
+      return () => clearInterval(interval);
+    }
+  }, [loading]);
+
+  // Load data
   useEffect(() => {
     async function load() {
       try {
@@ -26,30 +41,45 @@ export default function ProgressPage() {
         const user = await getCurrentUser();
         setCurrentUser(user);
         
-        if (!user) return;
+        if (!user) {
+          setLoading(false);
+          return;
+        }
         
-        const createdIssues = await getIssuesCreatedByUser(user.id);
+        const assignedIssues = await getIssuesAssignedToMe();
+        console.log(`Found ${assignedIssues.length} issues assigned to current user`);
+        
         const filteredIssues = [];
         
-        for (const issue of createdIssues) {
+        // Process issues to find exactly 2 parent levels
+        for (const issue of assignedIssues) {
           try {
-            if (issue.parent && issue.parent.id) {
-              const directParent = await getIssue(issue.parent.id);
+            // Skip if no parent (level 1 issues)
+            if (!issue.parent || !issue.parent.id) continue;
+            
+            // Get parent issue
+            const directParent = await getIssue(issue.parent.id);
+            if (!directParent) continue;
+            
+            // Check if parent has a parent (grandparent)
+            if (directParent.parent && directParent.parent.id) {
+              const grandparent = await getIssue(directParent.parent.id);
               
-              if (directParent && directParent.parent && directParent.parent.id) {
-                const grandparent = await getIssue(directParent.parent.id);
-                
-                if (grandparent && !grandparent.parent) {
-                  const fullIssue = await getIssue(issue.id);
+              // Only include if grandparent exists and has NO parent
+              if (grandparent && !grandparent.parent) {
+                // Get full issue with all details
+                const fullIssue = await getIssue(issue.id);
+                if (fullIssue) {
                   filteredIssues.push(fullIssue);
                 }
               }
             }
           } catch (err) {
-            console.error(`Error checking hierarchy for issue ${issue.id}:`, err);
+            console.error(`Error processing issue ${issue.id}:`, err);
           }
         }
         
+        console.log(`Filtered to ${filteredIssues.length} issues with exactly 2 parent levels`);
         setIssues(filteredIssues);
       } catch (err) {
         console.error("Error loading progress data:", err);
@@ -90,6 +120,25 @@ export default function ProgressPage() {
     "3ኛ ሩብዓመት",
     "4ኛ ሩብዓመት",
   ];
+
+  // Get quarter index based on position among non-empty quarters
+  const getQuarterIndex = (quarterName, issue) => {
+    if (!issue) return 0;
+    
+    // Get all quarter names (excluding annual plan)
+    const quarterNames = customFieldNames.filter(name => name !== "የዓመቱ እቅድ");
+    
+    // Filter to only non-empty quarters
+    const nonEmptyQuarters = quarterNames.filter(name => {
+      const value = getCustomField(issue, name);
+      return value !== "" && value !== "0" && value !== "0.0";
+    });
+    
+    // Find the position of the current quarter among non-empty quarters
+    const index = nonEmptyQuarters.indexOf(quarterName) + 1; // +1 for 1-based indexing
+    
+    return index > 0 ? index : 0;
+  };
 
   const getFiscalYear = (date) => {
     const d = new Date(date);
@@ -197,35 +246,66 @@ export default function ProgressPage() {
     setShowPopup(true);
   };
 
+  // Get all quarter names (excluding annual plan)
+  const getQuarterNames = () => {
+    return customFieldNames.filter(name => name !== "የዓመቱ እቅድ");
+  };
+
+  // Count non-empty/non-zero quarters for an issue
+  const countNonEmptyQuarters = (issue) => {
+    return getQuarterNames().reduce((count, quarterName) => {
+      const value = getCustomField(issue, quarterName);
+      return count + (value !== "" && value !== "0" && value !== "0.0" ? 1 : 0);
+    }, 0);
+  };
+
   const calculatePerformance = () => {
-    if (!quarterValue || !selectedIssue) return;
+    if (quarterValue === "" || !selectedIssue || !selectedQuarter) return;
     
-    // Parse quarter value - allow 0
+    // Parse quarter value (allow 0)
     const quarterTargetStr = quarterValue.toString().replace(/[^\d.-]/g, '');
     const quarterTarget = parseFloat(quarterTargetStr);
-    const annualPlan = getCustomFieldAsNumber(selectedIssue, "የዓመቱ እቅድ");
+    
+    // Get the target for the active quarter
+    const activeQuarterTarget = getCustomFieldAsNumber(selectedIssue, selectedQuarter);
+    
+    // Count total non-empty quarters
+    const totalNonEmptyQuarters = countNonEmptyQuarters(selectedIssue);
+    
+    // Get quarter index based on position among non-empty quarters
+    const quarterIndex = getQuarterIndex(selectedQuarter, selectedIssue);
     
     console.log("Calculation values:", {
       quarterTarget,
-      annualPlan,
+      activeQuarterTarget,
       quarterValueInput: quarterValue,
-      isQuarterTargetZero: quarterTarget === 0
+      totalNonEmptyQuarters,
+      quarterIndex,
     });
     
-    // Allow 0 as valid input
-    if (annualPlan > 0 && !isNaN(quarterTarget)) {
-      // Formula: (quarter_input_value × 100) / annual_plan
-      const quarterPercent = (quarterTarget * 100) / annualPlan;
-      console.log("Quarter percent calculated:", quarterPercent);
+    let calculatedPercent = 0;
+    
+    if (activeQuarterTarget > 0 && totalNonEmptyQuarters > 0 ) {
+      // Calculate percentage per quarter adjusted by quarter index
       
-      // Simply use the calculated percentage as the new done ratio
-      setCalculatedPercent(quarterPercent);
-      setNewDoneRatio(Math.min(Math.round(quarterPercent), 100));
-    } else {
-      // Reset if invalid values (annual plan must be > 0)
-      setCalculatedPercent(0);
-      setNewDoneRatio(0);
+      
+      if (quarterTarget === 0) {
+        const percentagePerQuarter = (100 / totalNonEmptyQuarters) *( quarterIndex-1);
+        // Special case: quarterValue is 0
+        calculatedPercent = percentagePerQuarter;
+      } else {
+        // Normal case: quarterValue is not 0
+        const percentagePerQuarter = (100 / totalNonEmptyQuarters) * quarterIndex;
+        calculatedPercent = (quarterTarget * percentagePerQuarter) / activeQuarterTarget;
+      }
     }
+    
+    console.log("Calculated percent:", calculatedPercent);
+    
+    // Ensure percentage is between 0-100
+    const finalPercent = Math.min(Math.max(calculatedPercent, 0), 100);
+    setCalculatedPercent(calculatedPercent);
+    setNewDoneRatio(finalPercent);
   };
 
   // Add a useEffect to recalculate when quarterValue changes
@@ -294,13 +374,54 @@ export default function ProgressPage() {
   if (loading) {
     return (
       <div style={{ 
-        padding: "30px", 
         display: "flex", 
+        flexDirection: "column",
         justifyContent: "center", 
         alignItems: "center",
-        height: "200px" 
+        height: "100vh",
+        backgroundColor: "#f5f5f5"
       }}>
-        <div>Loading progress data...</div>
+        {/* Loading Spinner */}
+        <div style={{
+          width: "50px",
+          height: "50px",
+          border: "5px solid #f3f3f3",
+          borderTop: "5px solid #4CAF50",
+          borderRadius: "50%",
+          animation: "spin 1s linear infinite",
+          marginBottom: "20px"
+        }}></div>
+        
+        {/* Loading Text */}
+        <div style={{
+          fontSize: "18px",
+          color: "#555",
+          fontWeight: "500",
+          marginBottom: "10px"
+        }}>
+          Loading Progress Data{loadingDots}
+        </div>
+        
+        {/* Subtext */}
+        <div style={{
+          fontSize: "14px",
+          color: "#777",
+          textAlign: "center",
+          maxWidth: "400px",
+          lineHeight: "1.5"
+        }}>
+          Fetching issues and analyzing hierarchy structure...
+        </div>
+
+        {/* CSS for spinner animation */}
+        <style>
+          {`
+            @keyframes spin {
+              0% { transform: rotate(0deg); }
+              100% { transform: rotate(360deg); }
+            }
+          `}
+        </style>
       </div>
     );
   }
@@ -319,7 +440,7 @@ export default function ProgressPage() {
       }}
     >
       <h1 style={{ textAlign: "center", marginBottom: "25px", color: "#333" }}>
-        Quarterly Progress
+        Quarterly Progress 
       </h1>
 
       {/* Current Quarter Info */}
@@ -331,11 +452,7 @@ export default function ProgressPage() {
         borderRadius: "5px",
         border: `1px solid ${currentQuarter ? "#4CAF50" : (isJan8_2026 ? "#FF9800" : "#f44336")}`
       }}>
-        <div style={{ fontWeight: "bold", color: currentQuarter ? "#2E7D32" : (isJan8_2026 ? "#EF6C00" : "#d32f2f") }}>
-          Ethiopian Fiscal Year Information
-        </div>
-        <div>Current Date: {today.toLocaleDateString()}</div>
-        <div>Fiscal Year: {fiscalYearStart}-{fiscalYearEnd}</div>
+        
         <div>
           <strong>Current Quarter: {currentQuarter || "No active quarter"}</strong>
         </div>
@@ -360,9 +477,7 @@ export default function ProgressPage() {
           fontSize: "12px",
           textAlign: "left"
         }}>
-          <div style={{ fontWeight: "bold", marginBottom: "5px" }}>
-            Quarter Dates for Fiscal Year {fiscalYearStart}-{fiscalYearEnd}:
-          </div>
+        
           {customFieldNames.filter(name => name !== "የዓመቱ እቅድ").map(name => {
             const [start, end] = getQuarterDateRange(name, fiscalYearStart);
             const isActive = isQuarterActive(name);
@@ -395,7 +510,10 @@ export default function ProgressPage() {
           color: "#888",
           fontSize: "16px"
         }}>
-          No hierarchical issues found that were created by you.
+          No hierarchical issues found that are assigned to you.
+          <div style={{ marginTop: "10px", fontSize: "14px" }}>
+            Looking for issues with exactly 2 parent levels (grandparent → parent → child)
+          </div>
         </div>
       ) : (
         <div style={{ overflowX: "auto" }}>
@@ -436,6 +554,7 @@ export default function ProgressPage() {
                 >
                   <td style={tdStyle}>
                     <div>{issue.subject}</div>
+                    
                   </td>
                   
                   <td style={tdStyle}>
@@ -454,11 +573,16 @@ export default function ProgressPage() {
                     const isCurrentQuarter = name === currentQuarter;
                     const isQ2 = name === "2ኛ ሩብዓመት";
                     const showQ2Button = isJan8_2026 && isQ2 && val !== "" && val !== "0";
+                    const nonEmptyQuarters = countNonEmptyQuarters(issue);
+                    const quarterIndex = getQuarterIndex(name, issue);
                     
                     return (
                       <td key={name} style={tdStyle}>
                         <div style={{ marginBottom: "8px", position: "relative" }}>
-                          <div>{val || "(empty)"}</div>
+                          <div>
+                            {val || "(empty)"}
+                           
+                          </div>
                           {isCurrentQuarter && (
                             <div style={{
                               position: "absolute",
@@ -494,7 +618,7 @@ export default function ProgressPage() {
                         {(isActive || showQ2Button) ? (
                           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "5px" }}>
                             <div style={{ fontSize: "12px", color: "#666" }}>
-                              Current Progress: {issue.done_ratio || 0}%
+                              Quarters with values: {nonEmptyQuarters}
                             </div>
                             <button
                               onClick={() => handlePerformanceClick(issue, name)}
@@ -535,7 +659,7 @@ export default function ProgressPage() {
       {showPopup && selectedIssue && (
         <div style={{
           position: "fixed",
-          top: 0,
+          top: 70,
           left: 0,
           right: 0,
           bottom: 0,
@@ -550,12 +674,10 @@ export default function ProgressPage() {
             padding: "30px",
             borderRadius: "10px",
             boxShadow: "0 10px 30px rgba(0,0,0,0.3)",
-            width: "450px",
+            width: "500px",
             maxWidth: "90%",
           }}>
-            <h3 style={{ marginBottom: "20px", color: "#333" }}>
-              Add Performance Achievement
-            </h3>
+            
             
             <div style={{ marginBottom: "15px" }}>
               <strong>Issue:</strong> {selectedIssue.subject}
@@ -596,7 +718,8 @@ export default function ProgressPage() {
               borderRadius: "5px",
               borderLeft: "4px solid #2196F3"
             }}>
-              <div><strong>Annual Plan:</strong> {getCustomField(selectedIssue, "የዓመቱ እቅድ")} (Value: {getCustomFieldAsNumber(selectedIssue, "የዓመቱ እቅድ")})</div>
+              <div><strong>Current Quarter Target:</strong> {getCustomField(selectedIssue, selectedQuarter)} (Value: {getCustomFieldAsNumber(selectedIssue, selectedQuarter)})</div>
+              
               <div><strong>Current Done Ratio:</strong> {selectedIssue.done_ratio || 0}%</div>
             </div>
             
@@ -628,9 +751,7 @@ export default function ProgressPage() {
                 }}
                 placeholder="Enter achievement value for this quarter (0 is allowed)"
               />
-              <div style={{ fontSize: "12px", color: "#666", marginTop: "5px" }}>
-                Enter numeric value (e.g., 0, 1000, or 1000.50)
-              </div>
+             
             </div>
             
             {quarterValue !== "" && !isNaN(parseFloat(quarterValue.replace(/[^\d.-]/g, ''))) && (
@@ -644,73 +765,21 @@ export default function ProgressPage() {
                 <div style={{ marginBottom: "10px", fontWeight: "bold", color: "#2196F3" }}>
                   Performance Calculation
                 </div>
+                
                 <div style={{ fontSize: "14px", color: "#666", marginBottom: "5px" }}>
-                  <div>Quarter Achievement: {quarterValue}</div>
-                  <div>Annual Plan: {getCustomFieldAsNumber(selectedIssue, "የዓመቱ እቅድ")}</div>
-                  {getCustomFieldAsNumber(selectedIssue, "የዓመቱ እቅድ") > 0 ? (
-                    <div style={{ margin: "5px 0" }}>
-                      ({quarterValue} × 100) ÷ {getCustomFieldAsNumber(selectedIssue, "የዓመቱ እቅድ")} = <strong>{calculatedPercent.toFixed(2)}%</strong>
-                    </div>
-                  ) : (
-                    <div style={{ margin: "5px 0", color: "#f44336" }}>
-                      Cannot calculate: Annual plan must be greater than 0
-                    </div>
-                  )}
+                  <div><strong>Quarter Achievement:</strong> {quarterValue}</div>
+                  <div><strong>Active Quarter Target:</strong> {getCustomFieldAsNumber(selectedIssue, selectedQuarter)}</div>
+                
                 </div>
                 
-                <div style={{ 
-                  marginTop: "10px", 
-                  paddingTop: "10px", 
-                  borderTop: "1px dashed #ddd" 
-                }}>
-                  <div style={{ fontSize: "14px", marginBottom: "5px" }}>
-                    <strong>Setting New Done Ratio:</strong>
-                  </div>
-                  <div style={{ fontSize: "14px", color: "#666" }}>
-                    Calculated: {calculatedPercent.toFixed(2)}% → Rounded: {newDoneRatio}%
-                  </div>
-                  <div style={{ 
-                    fontSize: "14px", 
-                    color: newDoneRatio === 0 ? "#666" : "#4CAF50",
-                    fontWeight: "bold",
-                    marginTop: "5px"
-                  }}>
-                    New Done Ratio: {newDoneRatio}%
-                  </div>
-                  <div style={{ 
-                    fontSize: "12px", 
-                    color: "#666",
-                    fontStyle: "italic",
-                    marginTop: "5px"
-                  }}>
-                    {newDoneRatio === 0 ? 
-                      "(This will set done ratio to 0%)" : 
-                      `(This will replace the current done ratio of ${selectedIssue.done_ratio || 0}%)`}
-                  </div>
-                </div>
+               
+                
+                
+                
               </div>
             )}
             
-            {quarterValue !== "" && (isNaN(parseFloat(quarterValue.replace(/[^\d.-]/g, ''))) || getCustomFieldAsNumber(selectedIssue, "የዓመቱ እቅድ") <= 0) && (
-              <div style={{
-                marginBottom: "20px",
-                padding: "15px",
-                backgroundColor: "#fff8e1",
-                borderRadius: "5px",
-                border: "1px solid #ffd54f",
-              }}>
-                <div style={{ color: "#ff6f00", fontWeight: "bold" }}>
-                  Cannot Calculate
-                </div>
-                <div style={{ fontSize: "14px", color: "#666", marginTop: "5px" }}>
-                  Please check if:
-                  <ul style={{ marginLeft: "20px", marginTop: "5px" }}>
-                    <li>Quarter achievement value is valid number</li>
-                    <li>Annual plan value is greater than 0</li>
-                  </ul>
-                </div>
-              </div>
-            )}
+          
             
             <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "20px" }}>
               <button
@@ -766,7 +835,7 @@ export default function ProgressPage() {
           color: "#666",
           textAlign: "center" 
         }}>
-          <div>Showing {issues.length} issue(s) with grandparent → parent → child hierarchy</div>
+          
           <div style={{ marginTop: "5px", fontWeight: "bold", color: currentQuarter ? "#2E7D32" : "#EF6C00" }}>
             {currentQuarter 
               ? `Performance buttons enabled for current quarter (${currentQuarter})`

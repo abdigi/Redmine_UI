@@ -8,7 +8,7 @@ import {
   getProjectMembers,
   createIssue,
   updateIssue,
-  deleteIssue  // Make sure this function exists in redmineApi.js
+  deleteIssue
 } from "../api/redmineApi";
 
 export default function AddSubIssue() {
@@ -100,15 +100,16 @@ export default function AddSubIssue() {
           }
         });
         
-        // Load sub-issues created by current user for each child issue
+        // Load sub-issues ASSIGNED TO current user for each child issue
         const childWithSubIssuesMap = new Map();
         
         if (childIssueIds.size > 0) {
-          const subIssues = await getIssuesCreatedByUser(currentUser.id);
+          // CHANGED: Use getIssuesAssignedToMe instead of getIssuesCreatedByUser
+          const assignedIssues = await getIssuesAssignedToMe();
           
           // Filter sub-issues for each child issue
           for (const childId of childIssueIds) {
-            const childSubIssues = subIssues.filter(issue => 
+            const childSubIssues = assignedIssues.filter(issue => 
               issue.parent && issue.parent.id === childId
             );
             
@@ -311,14 +312,15 @@ export default function AddSubIssue() {
         }
       });
       
-      // Load sub-issues created by current user for each child issue
+      // Load sub-issues ASSIGNED TO current user for each child issue
       const childWithSubIssuesMap = new Map();
       
       if (childIssueIds.size > 0) {
-        const subIssues = await getIssuesCreatedByUser(currentUser.id);
+        // CHANGED: Use getIssuesAssignedToMe instead of getIssuesCreatedByUser
+        const assignedIssues = await getIssuesAssignedToMe();
         
         for (const childId of childIssueIds) {
-          const childSubIssues = subIssues.filter(issue => 
+          const childSubIssues = assignedIssues.filter(issue => 
             issue.parent && issue.parent.id === childId
           );
           
@@ -360,16 +362,57 @@ export default function AddSubIssue() {
     }
   };
 
+  // CSS for loading spinner
+  const spinnerStyles = {
+    spinnerContainer: {
+      display: 'flex',
+      justifyContent: 'center',
+      alignItems: 'center',
+      minHeight: '300px',
+      width: '100%'
+    },
+    spinner: {
+      width: '50px',
+      height: '50px',
+      border: '4px solid rgba(76, 175, 80, 0.2)',
+      borderTop: '4px solid #4caf50',
+      borderRadius: '50%',
+      animation: 'spin 1s linear infinite'
+    },
+    overlaySpinner: {
+      width: '40px',
+      height: '40px',
+      border: '3px solid rgba(255, 255, 255, 0.3)',
+      borderTop: '3px solid white',
+      borderRadius: '50%',
+      animation: 'spin 1s linear infinite'
+    }
+  };
+
+  // Add CSS animation for spinner
+  const spinnerCSS = `
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+  `;
+
   if (!currentUser && loading) {
     return (
       <div style={{ padding: "20px", textAlign: "center" }}>
-        <h1>Loading user information...</h1>
+        <style>{spinnerCSS}</style>
+        <h1 style={{ color: "#2e7d32", marginBottom: "30px" }}>Loading User Information</h1>
+        <div style={spinnerStyles.spinnerContainer}>
+          <div style={spinnerStyles.spinner}></div>
+        </div>
+        <p style={{ color: "#666", marginTop: "20px", fontSize: "14px" }}>Please wait while we load your user information...</p>
       </div>
     );
   }
 
   return (
     <div style={{ padding: "20px", maxWidth: "1200px", margin: "0 auto" }}>
+      <style>{spinnerCSS}</style>
       <h1 style={{ color: "#2e7d32", marginBottom: "20px" }}>Add የግል እቅድ</h1>
       
       <div style={{ 
@@ -380,13 +423,71 @@ export default function AddSubIssue() {
         boxShadow: "0 2px 8px rgba(0,0,0,0.1)"
       }}>
         
-        
         {loading ? (
-          <div style={{ textAlign: "center", padding: "20px" }}>
-            <p>Loading issues...</p>
+          <div style={{ 
+            textAlign: "center", 
+            padding: "60px 20px",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center"
+          }}>
+            <div style={spinnerStyles.spinner}></div>
+            <p style={{ 
+              marginTop: "20px", 
+              color: "#4caf50",
+              fontSize: "16px",
+              fontWeight: "600"
+            }}>
+              Loading your issues...
+            </p>
+            <p style={{ 
+              marginTop: "10px", 
+              color: "#666",
+              fontSize: "14px"
+            }}>
+              Please wait while we fetch your assigned tasks
+            </p>
           </div>
         ) : parentIssues.length === 0 ? (
-          <p>No issues assigned to you.</p>
+          <div style={{ 
+            textAlign: "center", 
+            padding: "40px 20px",
+            background: "#f9f9f9",
+            borderRadius: "8px"
+          }}>
+            <div style={{
+              width: "80px",
+              height: "80px",
+              margin: "0 auto 20px",
+              background: "#e8f5e9",
+              borderRadius: "50%",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center"
+            }}>
+              <span style={{ 
+                fontSize: "40px", 
+                color: "#4caf50" 
+              }}>
+                📋
+              </span>
+            </div>
+            <h3 style={{ 
+              color: "#2e7d32", 
+              marginBottom: "10px" 
+            }}>
+              No Issues Assigned
+            </h3>
+            <p style={{ 
+              color: "#666", 
+              fontSize: "14px",
+              maxWidth: "400px",
+              margin: "0 auto"
+            }}>
+              You don't have any issues assigned to you at the moment.
+            </p>
+          </div>
         ) : (
           <div style={{ overflowX: "auto" }}>
             <table style={{ 
@@ -416,7 +517,7 @@ export default function AddSubIssue() {
                         ዋና ተግባር
                       </td>
                       <td style={{ padding: "12px", fontWeight: "bold" }}>
-                        #{parent.id}: {parent.subject}
+                        {parent.subject}
                       </td>
                       <td style={{ padding: "12px" }}>{formatDate(parent.start_date)}</td>
                       <td style={{ padding: "12px" }}>{formatDate(parent.due_date)}</td>
@@ -437,7 +538,7 @@ export default function AddSubIssue() {
                             ዝርዝር ተግባር
                           </td>
                           <td style={{ padding: "12px", paddingLeft: "30px" }}>
-                            #{child.id}: {child.subject}
+                             {child.subject}
                           </td>
                           <td style={{ padding: "12px" }}>{formatDate(child.start_date)}</td>
                           <td style={{ padding: "12px" }}>{formatDate(child.due_date)}</td>
@@ -468,7 +569,7 @@ export default function AddSubIssue() {
                           </td>
                         </tr>
                         
-                        {/* Sub-Issues created by current user */}
+                        {/* Sub-Issues ASSIGNED TO current user */}
                         {childIssuesWithSubIssues.has(child.id) && (
                           childIssuesWithSubIssues.get(child.id).map(subIssue => (
                             <tr key={subIssue.id} style={{ 
@@ -480,7 +581,7 @@ export default function AddSubIssue() {
                                 የግል እቅድ
                               </td>
                               <td style={{ padding: "12px", paddingLeft: "50px" }}>
-                                #{subIssue.id}: {subIssue.subject}
+                                {subIssue.subject}
                               </td>
                               <td style={{ padding: "12px" }}>{formatDate(subIssue.start_date)}</td>
                               <td style={{ padding: "12px" }}>{formatDate(subIssue.due_date)}</td>
@@ -533,7 +634,24 @@ export default function AddSubIssue() {
                                       }
                                     }}
                                   >
-                                    {deleting ? "Deleting..." : "Delete"}
+                                    {deleting ? (
+                                      <div style={{ 
+                                        display: "flex", 
+                                        alignItems: "center", 
+                                        justifyContent: "center",
+                                        gap: "5px"
+                                      }}>
+                                        <div style={{
+                                          width: "12px",
+                                          height: "12px",
+                                          border: "2px solid rgba(255, 255, 255, 0.3)",
+                                          borderTop: "2px solid white",
+                                          borderRadius: "50%",
+                                          animation: "spin 1s linear infinite"
+                                        }}></div>
+                                        Deleting...
+                                      </div>
+                                    ) : "Delete"}
                                   </button>
                                 </div>
                               </td>
@@ -554,7 +672,7 @@ export default function AddSubIssue() {
       {showCreateModal && parentIssue && (
         <div style={{
           position: "fixed",
-          top: 0,
+          top: 90,
           left: 0,
           right: 0,
           bottom: 0,
@@ -961,7 +1079,7 @@ export default function AddSubIssue() {
       {showEditModal && editingIssue && parentIssue && (
         <div style={{
           position: "fixed",
-          top: 0,
+          top: 90,
           left: 0,
           right: 0,
           bottom: 0,
