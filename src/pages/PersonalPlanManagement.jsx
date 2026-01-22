@@ -50,7 +50,13 @@ export default function AddSubIssue() {
     "የአፈጻጸም አመልካች",
     "የእድገት ሪፖርት ማጠቃለያ",
     "የጠናቀቀ መረጃ",
-    "Supporters"
+    "Supporters",
+    "1ኛ ሩብዓመት_አፈጻጸም",
+    "2ኛ ሩብዓመት_አፈጻጸም",
+    "3ኛ ሩብዓመት_አፈጻጸም",
+    "4ኛ ሩብዓመት_አፈጻጸም"
+
+    
   ];
 
   // Load current user FIRST

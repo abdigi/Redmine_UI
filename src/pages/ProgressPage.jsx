@@ -14,8 +14,6 @@ export default function ProgressPage() {
   const [selectedIssue, setSelectedIssue] = useState(null);
   const [selectedQuarter, setSelectedQuarter] = useState("");
   const [quarterValue, setQuarterValue] = useState("");
-  const [calculatedPercent, setCalculatedPercent] = useState(0);
-  const [newDoneRatio, setNewDoneRatio] = useState(0);
   const [loadingDots, setLoadingDots] = useState("");
   
   const today = new Date();
@@ -121,23 +119,27 @@ export default function ProgressPage() {
     "4ኛ ሩብዓመት",
   ];
 
-  // Get quarter index based on position among non-empty quarters
-  const getQuarterIndex = (quarterName, issue) => {
-    if (!issue) return 0;
-    
-    // Get all quarter names (excluding annual plan)
-    const quarterNames = customFieldNames.filter(name => name !== "የዓመቱ እቅድ");
-    
-    // Filter to only non-empty quarters
-    const nonEmptyQuarters = quarterNames.filter(name => {
-      const value = getCustomField(issue, name);
-      return value !== "" && value !== "0" && value !== "0.0";
-    });
-    
-    // Find the position of the current quarter among non-empty quarters
-    const index = nonEmptyQuarters.indexOf(quarterName) + 1; // +1 for 1-based indexing
-    
-    return index > 0 ? index : 0;
+  const performanceFieldNames = [
+    "1ኛ ሩብዓመት_አፈጻጸም",
+    "2ኛ ሩብዓመት_አፈጻጸም",
+    "3ኛ ሩብዓመት_አፈጻጸም",
+    "4ኛ ሩብዓመት_አፈጻጸም",
+  ];
+
+  // Get performance field name based on quarter name
+  const getPerformanceFieldName = (quarterName) => {
+    switch(quarterName) {
+      case "1ኛ ሩብዓመት":
+        return "1ኛ ሩብዓመት_አፈጻጸም";
+      case "2ኛ ሩብዓመት":
+        return "2ኛ ሩብዓመት_አፈጻጸም";
+      case "3ኛ ሩብዓመት":
+        return "3ኛ ሩብዓመት_አፈጻጸም";
+      case "4ኛ ሩብዓመት":
+        return "4ኛ ሩብዓመት_አፈጻጸም";
+      default:
+        return "";
+    }
   };
 
   const getFiscalYear = (date) => {
@@ -209,40 +211,10 @@ export default function ProgressPage() {
     return null;
   };
 
-  const getQuarterProgressRange = (quarterName) => {
-    switch (quarterName) {
-      case "1ኛ ሩብዓመት":
-        return [0, 25];
-      case "2ኛ ሩብዓመት":
-        return [26, 50];
-      case "3ኛ ሩብዓመት":
-        return [51, 75];
-      case "4ኛ ሩብዓመት":
-        return [76, 100];
-      default:
-        return [0, 0];
-    }
-  };
-
-  const handleProgressChange = async (issueId, newDoneRatio) => {
-    setIssues((prev) =>
-      prev.map((i) => (i.id === issueId ? { ...i, done_ratio: newDoneRatio } : i))
-    );
-    await updateIssue(issueId, { done_ratio: newDoneRatio });
-  };
-
-  const mapFromQuarterRange = (quarterName, doneRatio) => {
-    const [min, max] = getQuarterProgressRange(quarterName);
-    if (max === min) return 0;
-    return Math.round(((doneRatio - min) / (max - min)) * 100);
-  };
-
   const handlePerformanceClick = (issue, quarterName) => {
     setSelectedIssue(issue);
     setSelectedQuarter(quarterName);
     setQuarterValue("");
-    setCalculatedPercent(0);
-    setNewDoneRatio(0);
     setShowPopup(true);
   };
 
@@ -251,102 +223,98 @@ export default function ProgressPage() {
     return customFieldNames.filter(name => name !== "የዓመቱ እቅድ");
   };
 
-  // Count non-empty/non-zero quarters for an issue
-  const countNonEmptyQuarters = (issue) => {
-    return getQuarterNames().reduce((count, quarterName) => {
-      const value = getCustomField(issue, quarterName);
-      return count + (value !== "" && value !== "0" && value !== "0.0" ? 1 : 0);
-    }, 0);
-  };
-
   const calculatePerformance = () => {
-    if (quarterValue === "" || !selectedIssue || !selectedQuarter) return;
+    if (quarterValue === "" || !selectedIssue || !selectedQuarter) return 0;
     
     // Parse quarter value (allow 0)
     const quarterTargetStr = quarterValue.toString().replace(/[^\d.-]/g, '');
     const quarterTarget = parseFloat(quarterTargetStr);
-    
-    // Get the target for the active quarter
-    const activeQuarterTarget = getCustomFieldAsNumber(selectedIssue, selectedQuarter);
-    
-    // Count total non-empty quarters
-    const totalNonEmptyQuarters = countNonEmptyQuarters(selectedIssue);
-    
-    // Get quarter index based on position among non-empty quarters
-    const quarterIndex = getQuarterIndex(selectedQuarter, selectedIssue);
-    
-    console.log("Calculation values:", {
-      quarterTarget,
-      activeQuarterTarget,
-      quarterValueInput: quarterValue,
-      totalNonEmptyQuarters,
-      quarterIndex,
-    });
-    
-    let calculatedPercent = 0;
-    
-    if (activeQuarterTarget > 0 && totalNonEmptyQuarters > 0 ) {
-      // Calculate percentage per quarter adjusted by quarter index
-      
-      
-      if (quarterTarget === 0) {
-        const percentagePerQuarter = (100 / totalNonEmptyQuarters) *( quarterIndex-1);
-        // Special case: quarterValue is 0
-        calculatedPercent = percentagePerQuarter;
-      } else {
-        // Normal case: quarterValue is not 0
-        const percentagePerQuarter = (100 / totalNonEmptyQuarters) * quarterIndex;
-        calculatedPercent = (quarterTarget * percentagePerQuarter) / activeQuarterTarget;
-      }
-    }
-    
-    console.log("Calculated percent:", calculatedPercent);
-    
-    // Ensure percentage is between 0-100
-    const finalPercent = Math.min(Math.max(calculatedPercent, 0), 100);
-    setCalculatedPercent(calculatedPercent);
-    setNewDoneRatio(finalPercent);
+    return isNaN(quarterTarget) ? 0 : quarterTarget;
   };
 
-  // Add a useEffect to recalculate when quarterValue changes
-  useEffect(() => {
-    if (selectedIssue && quarterValue !== "") {
-      calculatePerformance();
+  const handleSavePerformance = async () => {
+    if (!selectedIssue || !selectedQuarter || quarterValue === "") return;
+    
+    // Get the performance value from input
+    const performanceValue = calculatePerformance();
+    
+    // Get the performance field name
+    const performanceFieldName = getPerformanceFieldName(selectedQuarter);
+    
+    if (!performanceFieldName) {
+      console.error("No performance field name found for quarter:", selectedQuarter);
+      return;
     }
-  }, [quarterValue, selectedIssue]);
-
-  const handleSavePerformance = () => {
-    // Allow saving even if newDoneRatio is 0
-    if (!selectedIssue || !selectedQuarter || quarterValue === "" || newDoneRatio === undefined) return;
     
-    handleProgressChange(selectedIssue.id, newDoneRatio);
-    
-    setShowPopup(false);
-    setSelectedIssue(null);
-    setSelectedQuarter("");
-    setQuarterValue("");
-    setCalculatedPercent(0);
-    setNewDoneRatio(0);
+    try {
+      // First, try to get the custom field ID
+      const fieldId = getCustomFieldId(selectedIssue, performanceFieldName);
+      
+      // Prepare update data
+      const updateData = {
+        custom_fields: [{
+          id: fieldId,
+          name: performanceFieldName,
+          value: performanceValue.toString()
+        }]
+      };
+      
+      await updateIssue(selectedIssue.id, updateData);
+      
+      // Update local state
+      setIssues(prev => prev.map(issue => {
+        if (issue.id === selectedIssue.id) {
+          const updatedIssue = { ...issue };
+          if (!updatedIssue.custom_fields) {
+            updatedIssue.custom_fields = [];
+          }
+          
+          const fieldIndex = updatedIssue.custom_fields.findIndex(f => 
+            f.name === performanceFieldName
+          );
+          
+          if (fieldIndex >= 0) {
+            updatedIssue.custom_fields[fieldIndex].value = performanceValue.toString();
+          } else {
+            updatedIssue.custom_fields.push({
+              id: fieldId,
+              name: performanceFieldName,
+              value: performanceValue.toString()
+            });
+          }
+          
+          return updatedIssue;
+        }
+        return issue;
+      }));
+      
+      setShowPopup(false);
+      setSelectedIssue(null);
+      setSelectedQuarter("");
+      setQuarterValue("");
+    } catch (err) {
+      console.error("Error saving performance:", err);
+      alert("Failed to save performance. Please try again.");
+    }
   };
 
-  const isPerformanceButtonActive = (issue, quarterName) => {
+  // Helper function to get custom field ID
+  const getCustomFieldId = (issue, fieldName) => {
+    if (!issue.custom_fields) return null;
+    const field = issue.custom_fields.find((f) => f.name === fieldName);
+    return field ? field.id : null;
+  };
+
+  // Check if performance button should be shown for ANY quarter (not just active)
+  const isPerformanceButtonVisible = (issue, quarterName) => {
     const quarterVal = getCustomField(issue, quarterName);
-    const currentQuarter = getCurrentQuarter();
     
-    const isJan8_2026 = today.toLocaleDateString() === "1/8/2026";
-    const isQ2 = quarterName === "2ኛ ሩብዓመት";
-    const showQ2Button = isJan8_2026 && isQ2 && quarterVal !== "" && quarterVal !== "0";
-    
+    // Show button for any quarter that has a target value (not empty or zero)
     return (
       quarterName !== "የዓመቱ እቅድ" && 
       quarterVal !== "" && 
-      quarterVal !== "0" &&
-      (quarterName === currentQuarter || showQ2Button)
+      quarterVal !== "0"
     );
-  };
-
-  const getCurrentQuarterProgress = (doneRatio, quarterName) => {
-    return mapFromQuarterRange(quarterName, doneRatio);
   };
 
   const tableStyle = {
@@ -501,6 +469,19 @@ export default function ProgressPage() {
         <div style={{ marginTop: "15px", fontSize: "12px", color: "#666" }}>
           Fiscal Year starts with Q1 on May 9, {fiscalYearStart}
         </div>
+        
+        {/* New note about all quarters being open */}
+        <div style={{ 
+          marginTop: "15px", 
+          padding: "10px", 
+          backgroundColor: "#2196F3",
+          color: "white",
+          borderRadius: "5px",
+          fontSize: "14px",
+          fontWeight: "bold"
+        }}>
+          ℹ️ All quarters with target values are now open for performance entry
+        </div>
       </div>
 
       {issues.length === 0 ? (
@@ -521,7 +502,6 @@ export default function ProgressPage() {
             <thead>
               <tr>
                 <th style={{ ...thStyle, borderTopLeftRadius: "10px" }}>Subject</th>
-                <th style={thStyle}>Current %</th>
                 {customFieldNames.map((name, idx) => (
                   <th
                     key={name}
@@ -554,34 +534,25 @@ export default function ProgressPage() {
                 >
                   <td style={tdStyle}>
                     <div>{issue.subject}</div>
-                    
-                  </td>
-                  
-                  <td style={tdStyle}>
-                    <div style={{ 
-                      fontWeight: "bold", 
-                      color: issue.done_ratio > 50 ? "#4CAF50" : "#2196F3" 
-                    }}>
-                      {issue.done_ratio || 0}%
-                    </div>
                   </td>
 
                   {customFieldNames.map((name) => {
                     const val = getCustomField(issue, name);
-                    const isActive = isPerformanceButtonActive(issue, name);
-                    const currentQuarterProgress = getCurrentQuarterProgress(issue.done_ratio || 0, name);
+                    const isVisible = isPerformanceButtonVisible(issue, name);
                     const isCurrentQuarter = name === currentQuarter;
                     const isQ2 = name === "2ኛ ሩብዓመት";
                     const showQ2Button = isJan8_2026 && isQ2 && val !== "" && val !== "0";
-                    const nonEmptyQuarters = countNonEmptyQuarters(issue);
-                    const quarterIndex = getQuarterIndex(name, issue);
+                    
+                    // Get performance value for this quarter
+                    const performanceFieldName = getPerformanceFieldName(name);
+                    const performanceValue = performanceFieldName ? 
+                      getCustomField(issue, performanceFieldName) : "";
                     
                     return (
                       <td key={name} style={tdStyle}>
                         <div style={{ marginBottom: "8px", position: "relative" }}>
                           <div>
                             {val || "(empty)"}
-                           
                           </div>
                           {isCurrentQuarter && (
                             <div style={{
@@ -615,16 +586,30 @@ export default function ProgressPage() {
                           )}
                         </div>
                         
-                        {(isActive || showQ2Button) ? (
+                        {/* Show performance value if it exists */}
+                        {performanceValue && (
+                          <div style={{
+                            fontSize: "12px",
+                            color: "#2196F3",
+                            fontWeight: "bold",
+                            marginBottom: "5px",
+                            padding: "3px 8px",
+                            backgroundColor: "#E3F2FD",
+                            borderRadius: "3px",
+                            display: "inline-block"
+                          }}>
+                            Performance: {performanceValue}
+                          </div>
+                        )}
+                        
+                        {isVisible ? (
                           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "5px" }}>
-                            <div style={{ fontSize: "12px", color: "#666" }}>
-                              Quarters with values: {nonEmptyQuarters}
-                            </div>
                             <button
                               onClick={() => handlePerformanceClick(issue, name)}
                               style={{
                                 padding: "8px 16px",
-                                backgroundColor: showQ2Button ? "#FF5722" : "#FF9800",
+                                backgroundColor: showQ2Button ? "#FF5722" : 
+                                             isCurrentQuarter ? "#FF9800" : "#2196F3",
                                 color: "white",
                                 border: "none",
                                 borderRadius: "4px",
@@ -634,15 +619,25 @@ export default function ProgressPage() {
                                 transition: "background-color 0.3s",
                                 boxShadow: "0 2px 4px rgba(0,0,0,0.2)"
                               }}
-                              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = showQ2Button ? "#E64A19" : "#F57C00"}
-                              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = showQ2Button ? "#FF5722" : "#FF9800"}
+                              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 
+                                showQ2Button ? "#E64A19" : 
+                                isCurrentQuarter ? "#F57C00" : "#1976D2"}
+                              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 
+                                showQ2Button ? "#FF5722" : 
+                                isCurrentQuarter ? "#FF9800" : "#2196F3"}
                             >
-                              {showQ2Button ? "Add Performance (Last Day)" : "Add Performance"}
+                              {showQ2Button ? "Add Performance (Last Day)" : 
+                               isCurrentQuarter ? "Add Performance (Active)" : "Add Performance"}
                             </button>
+                            {!isCurrentQuarter && name !== "የዓመቱ እቅድ" && (
+                              <div style={{ fontSize: "11px", color: "#666", fontStyle: "italic" }}>
+                                Quarter {isQuarterActive(name) ? "active" : "not active"}
+                              </div>
+                            )}
                           </div>
-                        ) : name !== "የዓመቱ እቅድ" && val !== "" && val !== "0" && !isCurrentQuarter ? (
+                        ) : name !== "የዓመቱ እቅድ" ? (
                           <div style={{ fontSize: "12px", color: "#757575", fontStyle: "italic" }}>
-                            Quarter not active
+                            No target value
                           </div>
                         ) : null}
                       </td>
@@ -678,7 +673,6 @@ export default function ProgressPage() {
             maxWidth: "90%",
           }}>
             
-            
             <div style={{ marginBottom: "15px" }}>
               <strong>Issue:</strong> {selectedIssue.subject}
             </div>
@@ -709,6 +703,18 @@ export default function ProgressPage() {
                   LAST DAY OF Q2
                 </span>
               )}
+              {selectedQuarter !== currentQuarter && !(selectedQuarter === "2ኛ ሩብዓመት" && isJan8_2026) && (
+                <span style={{ 
+                  backgroundColor: "#2196F3", 
+                  color: "white", 
+                  padding: "2px 8px", 
+                  borderRadius: "3px",
+                  fontSize: "12px",
+                  marginLeft: "10px"
+                }}>
+                  NON-ACTIVE QUARTER
+                </span>
+              )}
             </div>
             
             <div style={{ 
@@ -718,9 +724,23 @@ export default function ProgressPage() {
               borderRadius: "5px",
               borderLeft: "4px solid #2196F3"
             }}>
-              <div><strong>Current Quarter Target:</strong> {getCustomField(selectedIssue, selectedQuarter)} (Value: {getCustomFieldAsNumber(selectedIssue, selectedQuarter)})</div>
+              <div><strong>Quarter Target:</strong> {getCustomField(selectedIssue, selectedQuarter)}</div>
               
-              <div><strong>Current Done Ratio:</strong> {selectedIssue.done_ratio || 0}%</div>
+              {/* Show current performance value if it exists */}
+              {(() => {
+                const performanceFieldName = getPerformanceFieldName(selectedQuarter);
+                const currentPerformance = performanceFieldName ? 
+                  getCustomField(selectedIssue, performanceFieldName) : "";
+                
+                if (currentPerformance) {
+                  return (
+                    <div style={{ marginTop: "5px" }}>
+                      <strong>Current Performance:</strong> {currentPerformance}
+                    </div>
+                  );
+                }
+                return null;
+              })()}
             </div>
             
             <div style={{ marginBottom: "15px" }}>
@@ -754,33 +774,6 @@ export default function ProgressPage() {
              
             </div>
             
-            {quarterValue !== "" && !isNaN(parseFloat(quarterValue.replace(/[^\d.-]/g, ''))) && (
-              <div style={{
-                marginBottom: "20px",
-                padding: "15px",
-                backgroundColor: "#f5f5f5",
-                borderRadius: "5px",
-                border: "1px solid #ddd",
-              }}>
-                <div style={{ marginBottom: "10px", fontWeight: "bold", color: "#2196F3" }}>
-                  Performance Calculation
-                </div>
-                
-                <div style={{ fontSize: "14px", color: "#666", marginBottom: "5px" }}>
-                  <div><strong>Quarter Achievement:</strong> {quarterValue}</div>
-                  <div><strong>Active Quarter Target:</strong> {getCustomFieldAsNumber(selectedIssue, selectedQuarter)}</div>
-                
-                </div>
-                
-               
-                
-                
-                
-              </div>
-            )}
-            
-          
-            
             <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "20px" }}>
               <button
                 onClick={() => {
@@ -788,8 +781,6 @@ export default function ProgressPage() {
                   setSelectedIssue(null);
                   setSelectedQuarter("");
                   setQuarterValue("");
-                  setCalculatedPercent(0);
-                  setNewDoneRatio(0);
                 }}
                 style={{
                   padding: "10px 20px",
@@ -819,9 +810,9 @@ export default function ProgressPage() {
                   fontWeight: "bold",
                 }}
               >
-                {newDoneRatio === 0 ? 
-                  `Set to 0% (from ${selectedIssue.done_ratio || 0}%)` : 
-                  `Save Performance (${selectedIssue.done_ratio || 0}% → ${newDoneRatio}%)`}
+                {quarterValue === "0" ? 
+                  "Set Performance to 0" : 
+                  `Save Performance as ${quarterValue}`}
               </button>
             </div>
           </div>
@@ -836,15 +827,14 @@ export default function ProgressPage() {
           textAlign: "center" 
         }}>
           
-          <div style={{ marginTop: "5px", fontWeight: "bold", color: currentQuarter ? "#2E7D32" : "#EF6C00" }}>
-            {currentQuarter 
-              ? `Performance buttons enabled for current quarter (${currentQuarter})`
-              : isJan8_2026
-                ? "January 8, 2026 is the last day of Q2. Special button shown for Q2."
-                : `No active quarter detected for ${today.toLocaleDateString()}`}
+          <div style={{ marginTop: "5px", fontWeight: "bold", color: "#2196F3" }}>
+            ✓ All quarters with target values are enabled for performance entry
           </div>
           <div style={{ marginTop: "5px", fontSize: "11px", color: "#888" }}>
             Fiscal Year {fiscalYearStart}-{fiscalYearEnd} (Q1 starts May 9, {fiscalYearStart})
+          </div>
+          <div style={{ marginTop: "5px", fontSize: "10px", color: "#999" }}>
+            • Blue buttons: Non-active quarters • Orange buttons: Active quarters • Red buttons: Last day of Q2
           </div>
         </div>
       )}
