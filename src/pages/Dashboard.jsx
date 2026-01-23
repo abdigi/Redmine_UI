@@ -48,278 +48,144 @@ const getQuarterIndex = (quarterName) => {
   }
 };
 
-// Helper function to map progress based on period for sub-issues
-const mapSubIssueProgress = (donePercent, period, subIssue = null) => {
-  if (!donePercent) donePercent = 0;
-  
-  // For non-quarterly periods, use the actual done percentage
-  if (period === "Yearly") return donePercent;
-  
-  if (period === "6 Months") {
-    // For 6 months, target is 50% of yearly
-    return donePercent <= 50 ? Math.round((donePercent / 50) * 100) : 100;
+// Helper function to get quarter performance field name
+const getQuarterPerformanceField = (quarter) => {
+  switch (quarter) {
+    case "1ኛ ሩብዓመት": return "1ኛ ሩብዓመት_አፈጻጸም";
+    case "2ኛ ሩብዓመት": return "2ኛ ሩብዓመት_አፈጻጸም";
+    case "3ኛ ሩብዓመት": return "3ኛ ሩብዓመት_አፈጻጸም";
+    case "4ኛ ሩብዓመት": return "4ኛ ሩብዓመት_አፈጻጸም";
+    default: return null;
   }
-  
-  if (period === "9 Months") {
-    // For 9 months, target is 75% of yearly
-    return donePercent <= 75 ? Math.round((donePercent / 75) * 100) : 100;
-  }
-
-  // Handle quarterly periods with dynamic distribution
-  if (period.includes("ሩብዓመት")) {
-    const quarterIndex = getQuarterIndex(period);
-    
-    // If no subIssue provided, use simple logic
-    if (!subIssue) {
-      switch (quarterIndex) {
-        case 1:
-          return donePercent <= 25 ? Math.round((donePercent / 25) * 100) : 100;
-        case 2:
-          return donePercent >= 26 && donePercent <= 50
-            ? Math.round(((donePercent - 26) / 24) * 100)
-            : donePercent > 50
-            ? 100
-            : 0;
-        case 3:
-          return donePercent >= 51 && donePercent <= 75
-            ? Math.round(((donePercent - 51) / 24) * 100)
-            : donePercent > 75
-            ? 100
-            : 0;
-        case 4:
-          return donePercent >= 76 && donePercent <= 100
-            ? Math.round(((donePercent - 76) / 24) * 100)
-            : donePercent === 100
-            ? 100
-            : 0;
-        default:
-          return donePercent;
-      }
-    }
-    
-    // For quarterly periods, check SUB-ISSUE's quarter validity (not parent)
-    const getField = (issue, fieldName) => {
-      const field = issue.custom_fields?.find((f) => f.name === fieldName);
-      return field?.value;
-    };
-    
-    // Check which quarters have valid values for the SUB-ISSUE (not parent)
-    const hasValidQuarterValue = (issue, quarter) => {
-      const value = getField(issue, quarter);
-      return value && value !== "0" && value !== "" && value !== "0.0" && value !== "0.00";
-    };
-    
-    const quarters = ["1ኛ ሩብዓመት", "2ኛ ሩብዓመት", "3ኛ ሩብዓመት", "4ኛ ሩብዓመት"];
-    const validQuartersList = quarters.filter(quarter => hasValidQuarterValue(subIssue, quarter));
-    const validQuartersCount = validQuartersList.length;
-    
-    // If current quarter is not valid for THIS SUB-ISSUE, return 0
-    if (!validQuartersList.includes(period)) {
-      return 0;
-    }
-    
-    // Get quarter range for the current period based on SUB-ISSUE's valid quarters
-    let quarterRange;
-    
-    if (validQuartersCount === 4) {
-      // All 4 quarters valid - equal 25% each
-      const ranges = [
-        { start: 0, end: 25 },    // Q1: 0-25%
-        { start: 25, end: 50 },   // Q2: 25-50%
-        { start: 50, end: 75 },   // Q3: 50-75%
-        { start: 75, end: 100 }   // Q4: 75-100%
-      ];
-      quarterRange = ranges[quarterIndex - 1] || { start: 0, end: 100 };
-    }
-    else if (validQuartersCount === 3) {
-      // 3 quarters valid - equal 33.33% each
-      const segment = 100 / 3;
-      
-      // Determine which specific quarters are valid and map them
-      const validQuarters = quarters.filter(q => hasValidQuarterValue(subIssue, q));
-      
-      // Create ranges for valid quarters
-      const ranges = [];
-      let currentStart = 0;
-      const segmentSize = 100 / validQuarters.length;
-      
-      validQuarters.forEach((quarter, index) => {
-        const qIdx = getQuarterIndex(quarter);
-        ranges[qIdx - 1] = {
-          start: currentStart,
-          end: currentStart + segmentSize
-        };
-        currentStart += segmentSize;
-      });
-      
-      quarterRange = ranges[quarterIndex - 1] || { start: 0, end: 100 };
-    }
-    else if (validQuartersCount === 2) {
-      // 2 quarters valid - equal 50% each
-      // Determine which specific quarters are valid
-      const validQuarters = quarters.filter(q => hasValidQuarterValue(subIssue, q));
-      
-      if (validQuarters.length !== 2) {
-        quarterRange = { start: 0, end: 100 };
-      } else {
-        // Create ranges for the specific valid quarters
-        const ranges = {};
-        const segmentSize = 100 / validQuarters.length;
-        let currentStart = 0;
-        
-        validQuarters.forEach((quarter, index) => {
-          const qIdx = getQuarterIndex(quarter);
-          ranges[qIdx] = {
-            start: currentStart,
-            end: currentStart + segmentSize
-          };
-          currentStart += segmentSize;
-        });
-        
-        // Get the range for the target quarter
-        quarterRange = ranges[quarterIndex] || { start: 0, end: 100 };
-      }
-    }
-    else if (validQuartersCount === 1) {
-      // 1 quarter valid - use full range
-      quarterRange = { start: 0, end: 100 };
-    }
-    else {
-      // Default fallback - no valid quarters
-      return 0;
-    }
-    
-    // Now map the done percent based on the quarter range
-    const { start, end } = quarterRange;
-    const rangeSize = end - start;
-    
-    if (rangeSize <= 0) {
-      return 0;
-    }
-    
-    // Calculate the actual progress within the yearly total
-    const actualProgressInYear = donePercent;
-    
-    // Check if progress is within this quarter's range
-    if (actualProgressInYear < start) {
-      // Progress hasn't reached this quarter yet
-      return 0;
-    } else if (actualProgressInYear >= end) {
-      // Progress has completed this quarter
-      return 100;
-    } else {
-      // Progress is within this quarter's range
-      const progressInQuarter = actualProgressInYear - start;
-      const mappedPercent = Math.round((progressInQuarter / rangeSize) * 100);
-      return Math.min(100, Math.max(0, mappedPercent));
-    }
-  }
-  
-  return donePercent;
-};
-
-// ============================
-// QUARTER UTILITY FUNCTIONS
-// ============================
-
-// Helper function to check if a quarterly field has a valid value
-const hasValidQuarterValue = (issue, quarter) => {
-  const value = getField(issue, quarter);
-  return value && value !== "0" && value !== "" && value !== "0.0" && value !== "0.00";
-};
-
-// Get which specific quarters have valid values
-const getValidQuartersList = (issue) => {
-  const quarters = ["1ኛ ሩብዓመት", "2ኛ ሩብዓመት", "3ኛ ሩብዓመት", "4ኛ ሩብዓመት"];
-  return quarters.filter(quarter => hasValidQuarterValue(issue, quarter));
-};
-
-// Get quarter ranges based on which specific quarters are valid
-const getQuarterRanges = (validQuartersList, targetQuarter) => {
-  const validQuartersCount = validQuartersList.length;
-  const targetQuarterIndex = getQuarterIndex(targetQuarter);
-  
-  if (validQuartersCount === 4) {
-    // All 4 quarters valid - equal 25% each
-    const ranges = [
-      { start: 0, end: 25 },    // Q1: 0-25%
-      { start: 25, end: 50 },   // Q2: 25-50%
-      { start: 50, end: 75 },   // Q3: 50-75%
-      { start: 75, end: 100 }   // Q4: 75-100%
-    ];
-    return ranges[targetQuarterIndex - 1] || { start: 0, end: 100 };
-  }
-  
-  if (validQuartersCount === 3) {
-    // 3 quarters valid - equal 33.33% each
-    const segment = 100 / 3;
-    
-    // Create ranges for valid quarters
-    const ranges = [];
-    let currentStart = 0;
-    const segmentSize = 100 / validQuartersCount;
-    
-    validQuartersList.forEach((quarter, index) => {
-      const qIdx = getQuarterIndex(quarter);
-      ranges[qIdx - 1] = {
-        start: currentStart,
-        end: currentStart + segmentSize
-      };
-      currentStart += segmentSize;
-    });
-    
-    return ranges[targetQuarterIndex - 1] || { start: 0, end: 100 };
-  }
-  
-  if (validQuartersCount === 2) {
-    // 2 quarters valid - equal 50% each
-    // Create ranges for the specific valid quarters
-    const ranges = {};
-    const segmentSize = 100 / validQuartersCount;
-    let currentStart = 0;
-    
-    validQuartersList.forEach((quarter, index) => {
-      const qIdx = getQuarterIndex(quarter);
-      ranges[qIdx] = {
-        start: currentStart,
-        end: currentStart + segmentSize
-      };
-      currentStart += segmentSize;
-    });
-    
-    // Return the range for the target quarter
-    return ranges[targetQuarterIndex] || { start: 0, end: 100 };
-  }
-  
-  if (validQuartersCount === 1) {
-    // 1 quarter valid - use full range
-    return { start: 0, end: 100 };
-  }
-  
-  // Default fallback
-  return { start: 0, end: 100 };
-};
-
-// Helper function to get quarter distribution info
-const getQuarterDistributionInfo = (issue, period) => {
-  if (!period.includes("ሩብዓመት")) return null;
-  
-  const validQuartersList = getValidQuartersList(issue);
-  const validQuartersCount = validQuartersList.length;
-  const range = getQuarterRanges(validQuartersList, period);
-  
-  return {
-    validQuartersCount,
-    validQuartersList,
-    range,
-    hasValidValue: hasValidQuarterValue(issue, period)
-  };
 };
 
 // Get custom field value from issue
 const getField = (issue, fieldName) => {
   const field = issue.custom_fields?.find((f) => f.name === fieldName);
   return field?.value;
+};
+
+// Helper function to get progress percentage for a period
+const getProgressForPeriod = (issue, period) => {
+  if (period === "Yearly") {
+    // Formula: ((Q1_actual + Q2_actual + Q3_actual + Q4_actual) * 100) / yearly_target
+    const q1Actual = parseFloat(getField(issue, "1ኛ ሩብዓመት_አፈጻጸም") || "0");
+    const q2Actual = parseFloat(getField(issue, "2ኛ ሩብዓመት_አፈጻጸም") || "0");
+    const q3Actual = parseFloat(getField(issue, "3ኛ ሩብዓመት_አፈጻጸም") || "0");
+    const q4Actual = parseFloat(getField(issue, "4ኛ ሩብዓመት_አፈጻጸም") || "0");
+    const yearlyTarget = parseFloat(getField(issue, "የዓመቱ እቅድ") || "0");
+    
+    const totalActual = q1Actual + q2Actual + q3Actual + q4Actual;
+    
+    if (yearlyTarget <= 0) return 0;
+    
+    const progress = (totalActual * 100) / yearlyTarget;
+    return Math.round(Math.min(100, Math.max(0, progress)));
+  }
+  
+  if (period === "6 Months") {
+    // Average of Q1 and Q2 progress
+    const q1Actual = parseFloat(getField(issue, "1ኛ ሩብዓመት_አፈጻጸም") || "0");
+    const q2Actual = parseFloat(getField(issue, "2ኛ ሩብዓመት_አፈጻጸም") || "0");
+    const q1Target = parseFloat(getField(issue, "1ኛ ሩብዓመት") || "0");
+    const q2Target = parseFloat(getField(issue, "2ኛ ሩብዓመት") || "0");
+    
+    let totalProgress = 0;
+    let quartersCount = 0;
+    
+    // Q1 progress
+    if (q1Target > 0) {
+      const q1Progress = (q1Actual * 100) / q1Target;
+      totalProgress += Math.min(100, Math.max(0, q1Progress));
+      quartersCount++;
+    }
+    
+    // Q2 progress
+    if (q2Target > 0) {
+      const q2Progress = (q2Actual * 100) / q2Target;
+      totalProgress += Math.min(100, Math.max(0, q2Progress));
+      quartersCount++;
+    }
+    
+    if (quartersCount === 0) return 0;
+    
+    return Math.round(totalProgress / quartersCount);
+  }
+  
+  if (period === "9 Months") {
+    // Average of Q1, Q2, and Q3 progress
+    const q1Actual = parseFloat(getField(issue, "1ኛ ሩብዓመት_አፈጻጸም") || "0");
+    const q2Actual = parseFloat(getField(issue, "2ኛ ሩብዓመት_አፈጻጸም") || "0");
+    const q3Actual = parseFloat(getField(issue, "3ኛ ሩብዓመት_አፈጻጸም") || "0");
+    const q1Target = parseFloat(getField(issue, "1ኛ ሩብዓመት") || "0");
+    const q2Target = parseFloat(getField(issue, "2ኛ ሩብዓመት") || "0");
+    const q3Target = parseFloat(getField(issue, "3ኛ ሩብዓመት") || "0");
+    
+    let totalProgress = 0;
+    let quartersCount = 0;
+    
+    // Q1 progress
+    if (q1Target > 0) {
+      const q1Progress = (q1Actual * 100) / q1Target;
+      totalProgress += Math.min(100, Math.max(0, q1Progress));
+      quartersCount++;
+    }
+    
+    // Q2 progress
+    if (q2Target > 0) {
+      const q2Progress = (q2Actual * 100) / q2Target;
+      totalProgress += Math.min(100, Math.max(0, q2Progress));
+      quartersCount++;
+    }
+    
+    // Q3 progress
+    if (q3Target > 0) {
+      const q3Progress = (q3Actual * 100) / q3Target;
+      totalProgress += Math.min(100, Math.max(0, q3Progress));
+      quartersCount++;
+    }
+    
+    if (quartersCount === 0) return 0;
+    
+    return Math.round(totalProgress / quartersCount);
+  }
+  
+  // For quarterly periods
+  const quarterIndex = getQuarterIndex(period);
+  let quarterActual, quarterTarget;
+  
+  switch (quarterIndex) {
+    case 1:
+      quarterActual = parseFloat(getField(issue, "1ኛ ሩብዓመት_አፈጻጸም") || "0");
+      quarterTarget = parseFloat(getField(issue, "1ኛ ሩብዓመት") || "0");
+      break;
+    case 2:
+      quarterActual = parseFloat(getField(issue, "2ኛ ሩብዓመት_አፈጻጸም") || "0");
+      quarterTarget = parseFloat(getField(issue, "2ኛ ሩብዓመት") || "0");
+      break;
+    case 3:
+      quarterActual = parseFloat(getField(issue, "3ኛ ሩብዓመት_አፈጻጸም") || "0");
+      quarterTarget = parseFloat(getField(issue, "3ኛ ሩብዓመት") || "0");
+      break;
+    case 4:
+      quarterActual = parseFloat(getField(issue, "4ኛ ሩብዓመት_አፈጻጸም") || "0");
+      quarterTarget = parseFloat(getField(issue, "4ኛ ሩብዓመት") || "0");
+      break;
+    default:
+      return 0;
+  }
+  
+  // Formula: (quarter_actual * 100) / quarter_target
+  if (quarterTarget <= 0) return 0;
+  
+  const progress = (quarterActual * 100) / quarterTarget;
+  return Math.round(Math.min(100, Math.max(0, progress)));
+};
+
+// Helper function to check if a quarterly field has a valid value
+const hasValidQuarterValue = (issue, quarter) => {
+  const value = getField(issue, quarter);
+  return value && value !== "0" && value !== "" && value !== "0.0" && value !== "0.00";
 };
 
 // Helper function to get weight with default value
@@ -432,6 +298,48 @@ const getTargetValue = (issue, period) => {
   
   // For quarterly periods
   return getField(issue, period) || "0";
+};
+
+// Get actual performance value based on selected period
+const getActualValue = (issue, period) => {
+  if (period === "Yearly") {
+    const q1Actual = parseFloat(getField(issue, "1ኛ ሩብዓመት_አፈጻጸም") || "0");
+    const q2Actual = parseFloat(getField(issue, "2ኛ ሩብዓመት_አፈጻጸም") || "0");
+    const q3Actual = parseFloat(getField(issue, "3ኛ ሩብዓመት_አፈጻጸም") || "0");
+    const q4Actual = parseFloat(getField(issue, "4ኛ ሩብዓመት_አፈጻጸም") || "0");
+    
+    return q1Actual + q2Actual + q3Actual + q4Actual;
+  }
+  
+  if (period === "6 Months") {
+    const q1Actual = parseFloat(getField(issue, "1ኛ ሩብዓመት_አፈጻጸም") || "0");
+    const q2Actual = parseFloat(getField(issue, "2ኛ ሩብዓመት_አፈጻጸም") || "0");
+    
+    return q1Actual + q2Actual;
+  }
+  
+  if (period === "9 Months") {
+    const q1Actual = parseFloat(getField(issue, "1ኛ ሩብዓመት_አፈጻጸም") || "0");
+    const q2Actual = parseFloat(getField(issue, "2ኛ ሩብዓመት_አፈጻጸም") || "0");
+    const q3Actual = parseFloat(getField(issue, "3ኛ ሩብዓመት_አፈጻጸም") || "0");
+    
+    return q1Actual + q2Actual + q3Actual;
+  }
+  
+  // For quarterly periods
+  const quarterIndex = getQuarterIndex(period);
+  switch (quarterIndex) {
+    case 1:
+      return parseFloat(getField(issue, "1ኛ ሩብዓመት_አፈጻጸም") || "0");
+    case 2:
+      return parseFloat(getField(issue, "2ኛ ሩብዓመት_አፈጻጸም") || "0");
+    case 3:
+      return parseFloat(getField(issue, "3ኛ ሩብዓመት_አፈጻጸም") || "0");
+    case 4:
+      return parseFloat(getField(issue, "4ኛ ሩብዓመት_አፈጻጸም") || "0");
+    default:
+      return 0;
+  }
 };
 
 // Cache wrapper for getIssue with timeout
@@ -560,7 +468,7 @@ const getSubIssuesForUser = async (parentIssue, currentUserId) => {
   }
 };
 
-// Calculate Actual Weight for a 1-Level Issue WITH PERIOD-BASED PROGRESS MAPPING
+// Calculate Actual Weight for a 1-Level Issue
 const calculateActualWeight = async (oneLevelIssue, currentUserId, selectedPeriod) => {
   const issueWeight = getWeight(oneLevelIssue);
   console.log(`Calculating actual weight for 1-level issue #${oneLevelIssue.id} (weight: ${issueWeight}) for period: ${selectedPeriod}`);
@@ -577,72 +485,54 @@ const calculateActualWeight = async (oneLevelIssue, currentUserId, selectedPerio
       issueWeight,
       actualWeight: 0,
       subIssuesCount: 0,
-      avgSubIssuesMappedPercent: 0,
-      avgSubIssuesRawPercent: 0,
+      avgSubIssuesProgress: 0,
       hasSubIssues: false
     };
   }
   
-  // Calculate average of mapped progress percentages (with quarter logic)
-  let totalMappedPercent = 0;
-  let totalRawPercent = 0;
+  // Calculate average of sub-issues progress percentages
+  let totalProgress = 0;
   let validSubIssuesCount = 0;
   const subIssuesDetails = [];
   
   subIssues.forEach((subIssue, index) => {
-    const rawDonePercent = subIssue.done_ratio || 0;
+    // Get progress for the selected period using the custom field
+    const progress = getProgressForPeriod(subIssue, selectedPeriod);
     
-    // Apply period-based progress mapping - pass the SUB-ISSUE itself
-    const mappedDonePercent = mapSubIssueProgress(rawDonePercent, selectedPeriod, subIssue);
-    
-    console.log(`Sub-issue #${index + 1}: #${subIssue.id} - raw: ${rawDonePercent}%, mapped: ${mappedDonePercent}%`);
+    console.log(`Sub-issue #${index + 1}: #${subIssue.id} - progress: ${progress}%`);
     console.log(`  Sub-issue subject: ${subIssue.subject}`);
     
-    // Check sub-issue's quarter values for debugging
-    const quarters = ["1ኛ ሩብዓመት", "2ኛ ሩብዓመት", "3ኛ ሩብዓመት", "4ኛ ሩብዓመት"];
-    const validQuarters = quarters.filter(q => hasValidQuarterValue(subIssue, q));
-    console.log(`  Valid quarters for sub-issue: ${validQuarters.join(', ')} (${validQuarters.length} quarters)`);
+    totalProgress += progress;
+    validSubIssuesCount++;
     
-    if (rawDonePercent !== undefined && rawDonePercent !== null) {
-      totalRawPercent += rawDonePercent;
-      totalMappedPercent += mappedDonePercent;
-      validSubIssuesCount++;
-      
-      subIssuesDetails.push({
-        id: subIssue.id,
-        subject: subIssue.subject,
-        rawDonePercent,
-        mappedDonePercent,
-        weight: getWeight(subIssue),
-        validQuarters: validQuarters
-      });
-    }
+    subIssuesDetails.push({
+      id: subIssue.id,
+      subject: subIssue.subject,
+      progress,
+      weight: getWeight(subIssue),
+      actualValue: getActualValue(subIssue, selectedPeriod),
+      targetValue: getTargetValue(subIssue, selectedPeriod)
+    });
   });
   
-  const avgSubIssuesRawPercent = validSubIssuesCount > 0 
-    ? totalRawPercent / validSubIssuesCount 
-    : 0;
-    
-  const avgSubIssuesMappedPercent = validSubIssuesCount > 0 
-    ? totalMappedPercent / validSubIssuesCount 
+  const avgSubIssuesProgress = validSubIssuesCount > 0 
+    ? totalProgress / validSubIssuesCount 
     : 0;
   
-  console.log(`Average sub-issues - raw: ${avgSubIssuesRawPercent}%, mapped: ${avgSubIssuesMappedPercent}%`);
+  console.log(`Average sub-issues progress: ${avgSubIssuesProgress}%`);
   
-  // Calculate Actual Weight = (Issue Weight × Avg Mapped Sub-Issues Done Percent) ÷ 100
-  const actualWeight = (issueWeight * avgSubIssuesMappedPercent) / 100;
+  // Calculate Actual Weight = (Issue Weight × Avg Sub-Issues Progress) ÷ 100
+  const actualWeight = (issueWeight * avgSubIssuesProgress) / 100;
   
-  console.log(`Actual weight calculation: (${issueWeight} × ${avgSubIssuesMappedPercent}) ÷ 100 = ${actualWeight}`);
+  console.log(`Actual weight calculation: (${issueWeight} × ${avgSubIssuesProgress}) ÷ 100 = ${actualWeight}`);
   
   return {
     issueWeight,
     actualWeight,
     subIssuesCount: subIssues.length,
-    avgSubIssuesRawPercent,
-    avgSubIssuesMappedPercent,
+    avgSubIssuesProgress,
     hasSubIssues: true,
-    subIssuesDetails,
-    mappingApplied: selectedPeriod !== "Yearly" // Flag if quarter mapping was applied
+    subIssuesDetails
   };
 };
 
@@ -715,7 +605,7 @@ const calculateTwoLevelHierarchyPerformance = (issues, period) => {
 
   issues.forEach((issue) => {
     const weight = getWeight(issue);
-    const progress = issue.done_ratio || 0; // Use actual done ratio for 2-level
+    const progress = getProgressForPeriod(issue, period); // Use custom field progress
     totalWeight += weight;
     weightedProgress += progress * weight;
   });
@@ -723,7 +613,7 @@ const calculateTwoLevelHierarchyPerformance = (issues, period) => {
   return totalWeight > 0 ? Math.round(weightedProgress / totalWeight) : 0;
 };
 
-// Calculate 1-Level Hierarchy Performance using Actual Weight formula WITH PERIOD MAPPING
+// Calculate 1-Level Hierarchy Performance using Actual Weight formula
 const calculateOneLevelHierarchyPerformance = async (oneLevelIssues, currentUserId, period) => {
   if (oneLevelIssues.length === 0) return 0;
   
@@ -749,14 +639,12 @@ const calculateOneLevelHierarchyPerformance = async (oneLevelIssues, currentUser
       issueWeight,
       actualWeight: actualWeightData.actualWeight,
       subIssuesCount: actualWeightData.subIssuesCount,
-      avgSubIssuesRawPercent: actualWeightData.avgSubIssuesRawPercent,
-      avgSubIssuesMappedPercent: actualWeightData.avgSubIssuesMappedPercent,
+      avgSubIssuesProgress: actualWeightData.avgSubIssuesProgress,
       hasSubIssues: actualWeightData.hasSubIssues,
-      subIssuesDetails: actualWeightData.subIssuesDetails || [],
-      mappingApplied: actualWeightData.mappingApplied
+      subIssuesDetails: actualWeightData.subIssuesDetails || []
     });
     
-    console.log(`Issue #${issue.id}: weight=${issueWeight}, actualWeight=${actualWeightData.actualWeight}, subIssues=${actualWeightData.subIssuesCount}, mapping=${actualWeightData.mappingApplied ? 'Yes' : 'No'}`);
+    console.log(`Issue #${issue.id}: weight=${issueWeight}, actualWeight=${actualWeightData.actualWeight}, subIssues=${actualWeightData.subIssuesCount}`);
   }
   
   // Calculate performance: (Sum of Actual Weights × 100) / Sum of All Issue Weights
@@ -1127,32 +1015,28 @@ const Dashboard = () => {
       if (!chartDataMap.has(issue.id)) {
         const assignedTo = issue.assigned_to?.name || "Unassigned";
         const projectName = issue.project?.name || "No Project";
-        const validQuartersList = getValidQuartersList(issue);
-        const validQuartersCount = validQuartersList.length;
         
         const displayText = `#${issue.id}: ${issue.subject}`;
         const truncatedDisplay = displayText.length > 60 
           ? displayText.substring(0, 57) + "..." 
           : displayText;
         
-        const progress = issue.done_ratio || 0;
+        const progress = getProgressForPeriod(issue, selectedPeriod);
+        const actualValue = getActualValue(issue, selectedPeriod);
         
         chartDataMap.set(issue.id, {
           id: issue.id,
           name: truncatedDisplay,
           fullName: issue.subject,
           progress: progress,
+          actualValue: actualValue,
+          targetValue: targetValue,
           status: issue.status?.name,
           assignedTo: assignedTo,
           project: projectName,
           tracker: issue.tracker?.name || "Unknown",
-          doneRatio: issue.done_ratio || 0,
           parentId: issue.parent?.id,
           color: getProgressColor(progress),
-          validQuartersCount: validQuartersCount,
-          validQuartersList: validQuartersList,
-          targetValue: targetValue,
-          quarterDistribution: getQuarterDistributionInfo(issue, selectedPeriod),
           hierarchyLevel: issue.hierarchyLevel || 2
         });
       }
@@ -1174,10 +1058,10 @@ const Dashboard = () => {
     
     return validIssues.map(issue => {
       const targetValue = getTargetValue(issue, selectedPeriod);
-      const progress = issue.done_ratio || 0;
+      const progress = getProgressForPeriod(issue, selectedPeriod);
       const weight = getWeight(issue);
+      const actualValue = getActualValue(issue, selectedPeriod);
       const targetValueNum = parseFloat(targetValue) || 0;
-      const actualValue = targetValueNum > 0 ? ((progress / 100) * targetValueNum).toFixed(2) : "0.00";
       
       return {
         id: issue.id,
@@ -1185,10 +1069,9 @@ const Dashboard = () => {
         status: issue.status?.name || "Unknown",
         assignedTo: issue.assigned_to?.name || "Unassigned",
         targetValue: targetValue,
-        actualValue: actualValue,
+        actualValue: actualValue.toFixed(2),
         progress: progress,
         weight: weight,
-        doneRatio: issue.done_ratio || 0,
         tracker: issue.tracker?.name || "Unknown",
         hasValidTarget: true,
         hierarchyLevel: issue.hierarchyLevel || 2
@@ -1701,7 +1584,7 @@ const Dashboard = () => {
                 fontSize: '11px',
                 color: '#666'
               }}>
-                <span>Formula: Actual Weight = (Issue Weight × Avg Sub-Issues Done %) ÷ 100</span>
+                <span>Formula: Actual Weight = (Issue Weight × Avg Sub-Issues Progress %) ÷ 100</span>
                 <span>Performance = (∑Actual Weight × 100) ÷ ∑Issue Weight</span>
               </div>
               
@@ -1714,7 +1597,13 @@ const Dashboard = () => {
                 color: '#666',
                 borderLeft: '3px solid #2196F3'
               }}>
-                <strong>Note:</strong> "Avg Sub-Issues Done %" uses quarter-based progress mapping based on <strong>sub-issue's</strong> valid quarters.
+                <strong>Calculation Formulas:</strong>
+                <div style={{ marginTop: '5px' }}>
+                  Yearly: ((Q1_actual + Q2_actual + Q3_actual + Q4_actual) × 100) ÷ yearly_target
+                </div>
+                <div>
+                  Quarterly: (quarter_actual × 100) ÷ quarter_target
+                </div>
               </div>
               
               {/* 1-Level Performance Details - Changed text */}
@@ -1756,9 +1645,9 @@ const Dashboard = () => {
                     </span>
                   </div>
                   <div>
-                    <span style={{ color: '#666' }}>Period Mapping:</span>
+                    <span style={{ color: '#666' }}>Data Source:</span>
                     <span style={{ fontWeight: 'bold', marginLeft: '5px' }}>
-                      {selectedPeriod !== 'Yearly' ? 'Quarter-based' : 'None'}
+                      አፈጻጸም Custom Fields
                     </span>
                   </div>
                 </div>
@@ -1827,7 +1716,7 @@ const Dashboard = () => {
                 color: '#666'
               }}>
                 <span>Uses weighted average based on issue weights</span>
-                <span>Performance = (∑(Weight × Done %) ÷ ∑Weight) × 100</span>
+                <span>Performance = (∑(Weight × Progress %) ÷ ∑Weight) × 100</span>
               </div>
             </div>
           </div>
@@ -1965,9 +1854,6 @@ const Dashboard = () => {
                       content={({ active, payload }) => {
                         if (active && payload && payload.length) {
                           const data = payload[0].payload;
-                          const quarterInfo = data.quarterDistribution;
-                          const targetValueNum = parseFloat(data.targetValue) || 0;
-                          const actualValue = targetValueNum > 0 ? ((data.progress / 100) * targetValueNum).toFixed(2) : "0.00";
                           
                           return (
                             <div style={{
@@ -2051,7 +1937,7 @@ const Dashboard = () => {
                                     color: '#4CAF50',
                                     fontSize: '16px'
                                   }}>
-                                    {actualValue}
+                                    {data.actualValue.toFixed(2)}
                                   </span>
                                 
                                 </div>
@@ -2075,34 +1961,28 @@ const Dashboard = () => {
                                 </div>
                               </div>
                               
-                              {/* Quarter Distribution Info */}
-                              {quarterInfo && quarterInfo.hasValidValue && (
-                                <div style={{
-                                  marginTop: '15px',
-                                  padding: '10px',
-                                  backgroundColor: '#f0f7ff',
-                                  borderRadius: '6px',
-                                  fontSize: '12px',
-                                  borderLeft: '3px solid #1976d2'
-                                }}>
-                                  <div style={{ fontWeight: 'bold', color: '#1976d2', marginBottom: '5px' }}>
-                                    <span style={{ fontSize: '14px', marginRight: '5px' }}>📅</span>
-                                    Smart Quarter Mapping
-                                  </div>
-                                  <div style={{ fontSize: '11px', color: '#555' }}>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '3px' }}>
-                                      <span>Valid Quarters:</span>
-                                      <span style={{ fontWeight: 'bold' }}>{quarterInfo.validQuartersCount}/4</span>
-                                    </div>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '3px' }}>
-                                      <span>Range for {selectedPeriod}:</span>
-                                      <span style={{ fontWeight: 'bold' }}>
-                                        {quarterInfo.range.start.toFixed(1)}% - {quarterInfo.range.end.toFixed(1)}%
-                                      </span>
-                                    </div>
-                                  </div>
+                              <div style={{
+                                marginTop: '15px',
+                                padding: '10px',
+                                backgroundColor: '#f0f7ff',
+                                borderRadius: '6px',
+                                fontSize: '12px',
+                                borderLeft: '3px solid #1976d2'
+                              }}>
+                                <div style={{ fontWeight: 'bold', color: '#1976d2', marginBottom: '5px' }}>
+                                  <span style={{ fontSize: '14px', marginRight: '5px' }}>📊</span>
+                                  Calculation Formula
                                 </div>
-                              )}
+                                <div style={{ fontSize: '11px', color: '#555' }}>
+                                  {selectedPeriod === 'Yearly' ? (
+                                    <span>((Q1_actual + Q2_actual + Q3_actual + Q4_actual) × 100) ÷ yearly_target</span>
+                                  ) : selectedPeriod.includes('ሩብዓመት') ? (
+                                    <span>(quarter_actual × 100) ÷ quarter_target</span>
+                                  ) : (
+                                    <span>Average of quarter progress percentages</span>
+                                  )}
+                                </div>
+                              </div>
                             </div>
                           );
                         }
