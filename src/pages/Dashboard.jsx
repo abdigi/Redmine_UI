@@ -1,8 +1,10 @@
 import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { 
   getCurrentUser, 
-  getIssuesCreatedByUser,
-  getIssue
+  getIssuesAssignedToMe,
+  getIssuesAssignedToMeByFullName,
+  getIssue,
+  getIssuesAssigned
 } from "../api/redmineApi";
 import {
   BarChart,
@@ -13,11 +15,13 @@ import {
   ResponsiveContainer,
   CartesianGrid,
   LabelList,
-  Cell
+  Cell,
+  Legend
 } from "recharts";
 
 // Cache for already fetched issues to avoid duplicate API calls
 const issueCache = new Map();
+const subIssuesCache = new Map();
 
 // Utility functions
 const getProgressColor = (percentage) => {
@@ -33,177 +37,155 @@ const truncateText = (text, maxLength = 20) => {
   return text.length > maxLength ? `${text.slice(0, maxLength)}…` : text;
 };
 
-// ============================
-// PERIOD FILTERING FUNCTIONS
-// ============================
-
-// Helper function to check if a quarterly field has a valid value
-const hasValidQuarterValue = (issue, quarter) => {
-  const value = getField(issue, quarter);
-  return value && value !== "0" && value !== "" && value !== "0.0" && value !== "0.00";
+// Helper function to get quarter index
+const getQuarterIndex = (quarterName) => {
+  switch (quarterName) {
+    case "1ኛ ሩብዓመት": return 1;
+    case "2ኛ ሩብዓመት": return 2;
+    case "3ኛ ሩብዓመት": return 3;
+    case "4ኛ ሩብዓመት": return 4;
+    default: return 0;
+  }
 };
 
-// Get which specific quarters have valid values
-const getValidQuartersList = (issue) => {
-  const quarters = ["1ኛ ሩብዓመት", "2ኛ ሩብዓመት", "3ኛ ሩብዓመት", "4ኛ ሩብዓመት"];
-  return quarters.filter(quarter => hasValidQuarterValue(issue, quarter));
-};
-
-// Count how many quarters have valid values for an issue
-const countValidQuarters = (issue) => {
-  return getValidQuartersList(issue).length;
-};
-
-// Get quarter ranges based on which specific quarters are valid
-const getQuarterRanges = (validQuartersList, targetQuarter) => {
-  const validQuartersCount = validQuartersList.length;
-  
-  if (validQuartersCount === 4) {
-    // All 4 quarters valid - equal 25% each
-    const ranges = {
-      "1ኛ ሩብዓመት": { start: 0, end: 25 },
-      "2ኛ ሩብዓመት": { start: 25, end: 50 },
-      "3ኛ ሩብዓመት": { start: 50, end: 75 },
-      "4ኛ ሩብዓመት": { start: 75, end: 100 }
-    };
-    return ranges[targetQuarter] || { start: 0, end: 100 };
+// Helper function to get quarter performance field name
+const getQuarterPerformanceField = (quarter) => {
+  switch (quarter) {
+    case "1ኛ ሩብዓመት": return "1ኛ ሩብዓመት_አፈጻጸም";
+    case "2ኛ ሩብዓመት": return "2ኛ ሩብዓመት_አፈጻጸም";
+    case "3ኛ ሩብዓመት": return "3ኛ ሩብዓመት_አፈጻጸም";
+    case "4ኛ ሩብዓመት": return "4ኛ ሩብዓመት_አፈጻጸም";
+    default: return null;
   }
-  
-  if (validQuartersCount === 3) {
-    // 3 quarters valid - equal 33.33% each
-    const segment = 100 / 3;
-    
-    // Map each valid quarter to a range based on its position in the list
-    const ranges = {};
-    validQuartersList.forEach((quarter, index) => {
-      ranges[quarter] = {
-        start: index * segment,
-        end: (index + 1) * segment
-      };
-    });
-    
-    return ranges[targetQuarter] || { start: 0, end: 100 };
-  }
-  
-  if (validQuartersCount === 2) {
-    // 2 quarters valid - equal 50% each
-    const segment = 100 / 2;
-    
-    // Map each valid quarter to a range based on its position in the list
-    const ranges = {};
-    validQuartersList.forEach((quarter, index) => {
-      ranges[quarter] = {
-        start: index * segment,
-        end: (index + 1) * segment
-      };
-    });
-    
-    return ranges[targetQuarter] || { start: 0, end: 100 };
-  }
-  
-  if (validQuartersCount === 1) {
-    // 1 quarter valid - use full range
-    return { start: 0, end: 100 };
-  }
-  
-  // Default fallback
-  return { start: 0, end: 100 };
-};
-
-// Helper function to get quarter distribution info
-const getQuarterDistributionInfo = (issue, period) => {
-  if (!period.includes("ሩብዓመት")) return null;
-  
-  const validQuartersList = getValidQuartersList(issue);
-  const validQuartersCount = validQuartersList.length;
-  const range = getQuarterRanges(validQuartersList, period);
-  
-  return {
-    validQuartersCount,
-    validQuartersList,
-    range,
-    hasValidValue: hasValidQuarterValue(issue, period)
-  };
-};
-
-// Map progress based on selected period and quarterly distribution
-const mapProgress = (done, period, issue = null) => {
-  if (!done && done !== 0) return 0;
-  
-  // For non-quarterly periods, use existing logic
-  if (period === "Yearly") return done;
-  
-  if (period === "6 Months") {
-    // For 6 months, target is 50% of yearly
-    return done <= 50 ? Math.round((done / 50) * 100) : 100;
-  }
-  
-  if (period === "9 Months") {
-    // For 9 months, target is 75% of yearly
-    return done <= 75 ? Math.round((done / 75) * 100) : 100;
-  }
-
-  // Handle quarterly periods with dynamic distribution
-  if (period.includes("ሩብዓመት")) {
-    // If no issue provided, use old logic as fallback
-    if (!issue) {
-      switch (period) {
-        case "1ኛ ሩብዓመት":
-          return done <= 25 ? Math.round((done / 25) * 100) : 100;
-        case "2ኛ ሩብዓመት":
-          return done >= 26 && done <= 50
-            ? Math.round(((done - 26) / 24) * 100)
-            : done > 50
-            ? 100
-            : 0;
-        case "3ኛ ሩብዓመት":
-          return done >= 51 && done <= 75
-            ? Math.round(((done - 51) / 24) * 100)
-            : done > 75
-            ? 100
-            : 0;
-        case "4ኛ ሩብዓመት":
-          return done >= 76 && done <= 100
-            ? Math.round(((done - 76) / 24) * 100)
-            : done === 100
-            ? 100
-            : 0;
-        default:
-          return 0;
-      }
-    }
-    
-    // Check if this specific quarter has a valid value
-    const hasValidValue = hasValidQuarterValue(issue, period);
-    
-    // If this quarter doesn't have a valid value, return 0
-    if (!hasValidValue) return 0;
-    
-    // Get which specific quarters are valid
-    const validQuartersList = getValidQuartersList(issue);
-    
-    // Get the range for this quarter based on which quarters are valid
-    const range = getQuarterRanges(validQuartersList, period);
-    
-    // Calculate progress within this quarter's range
-    if (done <= range.start) {
-      return 0;
-    } else if (done >= range.end) {
-      return 100;
-    } else {
-      // Map done percentage to 0-100 within this quarter's range
-      const progressInRange = ((done - range.start) / (range.end - range.start)) * 100;
-      return Math.round(progressInRange);
-    }
-  }
-  
-  return 0;
 };
 
 // Get custom field value from issue
 const getField = (issue, fieldName) => {
   const field = issue.custom_fields?.find((f) => f.name === fieldName);
   return field?.value;
+};
+
+// Helper function to get progress percentage for a period
+const getProgressForPeriod = (issue, period) => {
+  if (period === "Yearly") {
+    // Formula: ((Q1_actual + Q2_actual + Q3_actual + Q4_actual) * 100) / yearly_target
+    const q1Actual = parseFloat(getField(issue, "1ኛ ሩብዓመት_አፈጻጸም") || "0");
+    const q2Actual = parseFloat(getField(issue, "2ኛ ሩብዓመት_አፈጻጸም") || "0");
+    const q3Actual = parseFloat(getField(issue, "3ኛ ሩብዓመት_አፈጻጸም") || "0");
+    const q4Actual = parseFloat(getField(issue, "4ኛ ሩብዓመት_አፈጻጸም") || "0");
+    const yearlyTarget = parseFloat(getField(issue, "የዓመቱ እቅድ") || "0");
+    
+    const totalActual = q1Actual + q2Actual + q3Actual + q4Actual;
+    
+    if (yearlyTarget <= 0) return 0;
+    
+    const progress = (totalActual * 100) / yearlyTarget;
+    return Math.round(Math.min(100, Math.max(0, progress)));
+  }
+  
+  if (period === "6 Months") {
+    // Average of Q1 and Q2 progress
+    const q1Actual = parseFloat(getField(issue, "1ኛ ሩብዓመት_አፈጻጸም") || "0");
+    const q2Actual = parseFloat(getField(issue, "2ኛ ሩብዓመት_አፈጻጸም") || "0");
+    const q1Target = parseFloat(getField(issue, "1ኛ ሩብዓመት") || "0");
+    const q2Target = parseFloat(getField(issue, "2ኛ ሩብዓመት") || "0");
+    
+    let totalProgress = 0;
+    let quartersCount = 0;
+    
+    // Q1 progress
+    if (q1Target > 0) {
+      const q1Progress = (q1Actual * 100) / q1Target;
+      totalProgress += Math.min(100, Math.max(0, q1Progress));
+      quartersCount++;
+    }
+    
+    // Q2 progress
+    if (q2Target > 0) {
+      const q2Progress = (q2Actual * 100) / q2Target;
+      totalProgress += Math.min(100, Math.max(0, q2Progress));
+      quartersCount++;
+    }
+    
+    if (quartersCount === 0) return 0;
+    
+    return Math.round(totalProgress / quartersCount);
+  }
+  
+  if (period === "9 Months") {
+    // Average of Q1, Q2, and Q3 progress
+    const q1Actual = parseFloat(getField(issue, "1ኛ ሩብዓመት_አፈጻጸም") || "0");
+    const q2Actual = parseFloat(getField(issue, "2ኛ ሩብዓመት_አፈጻጸም") || "0");
+    const q3Actual = parseFloat(getField(issue, "3ኛ ሩብዓመት_አፈጻጸም") || "0");
+    const q1Target = parseFloat(getField(issue, "1ኛ ሩብዓመት") || "0");
+    const q2Target = parseFloat(getField(issue, "2ኛ ሩብዓመት") || "0");
+    const q3Target = parseFloat(getField(issue, "3ኛ ሩብዓመት") || "0");
+    
+    let totalProgress = 0;
+    let quartersCount = 0;
+    
+    // Q1 progress
+    if (q1Target > 0) {
+      const q1Progress = (q1Actual * 100) / q1Target;
+      totalProgress += Math.min(100, Math.max(0, q1Progress));
+      quartersCount++;
+    }
+    
+    // Q2 progress
+    if (q2Target > 0) {
+      const q2Progress = (q2Actual * 100) / q2Target;
+      totalProgress += Math.min(100, Math.max(0, q2Progress));
+      quartersCount++;
+    }
+    
+    // Q3 progress
+    if (q3Target > 0) {
+      const q3Progress = (q3Actual * 100) / q3Target;
+      totalProgress += Math.min(100, Math.max(0, q3Progress));
+      quartersCount++;
+    }
+    
+    if (quartersCount === 0) return 0;
+    
+    return Math.round(totalProgress / quartersCount);
+  }
+  
+  // For quarterly periods
+  const quarterIndex = getQuarterIndex(period);
+  let quarterActual, quarterTarget;
+  
+  switch (quarterIndex) {
+    case 1:
+      quarterActual = parseFloat(getField(issue, "1ኛ ሩብዓመት_አፈጻጸም") || "0");
+      quarterTarget = parseFloat(getField(issue, "1ኛ ሩብዓመት") || "0");
+      break;
+    case 2:
+      quarterActual = parseFloat(getField(issue, "2ኛ ሩብዓመት_አፈጻጸም") || "0");
+      quarterTarget = parseFloat(getField(issue, "2ኛ ሩብዓመት") || "0");
+      break;
+    case 3:
+      quarterActual = parseFloat(getField(issue, "3ኛ ሩብዓመት_አፈጻጸም") || "0");
+      quarterTarget = parseFloat(getField(issue, "3ኛ ሩብዓመት") || "0");
+      break;
+    case 4:
+      quarterActual = parseFloat(getField(issue, "4ኛ ሩብዓመት_አፈጻጸም") || "0");
+      quarterTarget = parseFloat(getField(issue, "4ኛ ሩብዓመት") || "0");
+      break;
+    default:
+      return 0;
+  }
+  
+  // Formula: (quarter_actual * 100) / quarter_target
+  if (quarterTarget <= 0) return 0;
+  
+  const progress = (quarterActual * 100) / quarterTarget;
+  return Math.round(Math.min(100, Math.max(0, progress)));
+};
+
+// Helper function to check if a quarterly field has a valid value
+const hasValidQuarterValue = (issue, quarter) => {
+  const value = getField(issue, quarter);
+  return value && value !== "0" && value !== "" && value !== "0.0" && value !== "0.00";
 };
 
 // Helper function to get weight with default value
@@ -244,7 +226,7 @@ const isValidTargetValue = (targetValue, period) => {
   return true;
 };
 
-// Filter issues by selected period - STRICT VERSION
+// Filter issues by period - STRICT VERSION
 const filterIssuesByPeriod = (issues, period) => {
   if (period === "Yearly") {
     // For yearly, only include issues with valid "የዓመቱ እቅድ" value
@@ -318,6 +300,48 @@ const getTargetValue = (issue, period) => {
   return getField(issue, period) || "0";
 };
 
+// Get actual performance value based on selected period
+const getActualValue = (issue, period) => {
+  if (period === "Yearly") {
+    const q1Actual = parseFloat(getField(issue, "1ኛ ሩብዓመት_አፈጻጸም") || "0");
+    const q2Actual = parseFloat(getField(issue, "2ኛ ሩብዓመት_አፈጻጸም") || "0");
+    const q3Actual = parseFloat(getField(issue, "3ኛ ሩብዓመት_አፈጻጸም") || "0");
+    const q4Actual = parseFloat(getField(issue, "4ኛ ሩብዓመት_አፈጻጸም") || "0");
+    
+    return q1Actual + q2Actual + q3Actual + q4Actual;
+  }
+  
+  if (period === "6 Months") {
+    const q1Actual = parseFloat(getField(issue, "1ኛ ሩብዓመት_አፈጻጸም") || "0");
+    const q2Actual = parseFloat(getField(issue, "2ኛ ሩብዓመት_አፈጻጸም") || "0");
+    
+    return q1Actual + q2Actual;
+  }
+  
+  if (period === "9 Months") {
+    const q1Actual = parseFloat(getField(issue, "1ኛ ሩብዓመት_አፈጻጸም") || "0");
+    const q2Actual = parseFloat(getField(issue, "2ኛ ሩብዓመት_አፈጻጸም") || "0");
+    const q3Actual = parseFloat(getField(issue, "3ኛ ሩብዓመት_አፈጻጸም") || "0");
+    
+    return q1Actual + q2Actual + q3Actual;
+  }
+  
+  // For quarterly periods
+  const quarterIndex = getQuarterIndex(period);
+  switch (quarterIndex) {
+    case 1:
+      return parseFloat(getField(issue, "1ኛ ሩብዓመት_አፈጻጸም") || "0");
+    case 2:
+      return parseFloat(getField(issue, "2ኛ ሩብዓመት_አፈጻጸም") || "0");
+    case 3:
+      return parseFloat(getField(issue, "3ኛ ሩብዓመት_አፈጻጸም") || "0");
+    case 4:
+      return parseFloat(getField(issue, "4ኛ ሩብዓመት_አፈጻጸም") || "0");
+    default:
+      return 0;
+  }
+};
+
 // Cache wrapper for getIssue with timeout
 const cachedGetIssue = async (issueId) => {
   if (issueCache.has(issueId)) {
@@ -340,54 +364,231 @@ const cachedGetIssue = async (issueId) => {
   }
 };
 
-// Process single issue efficiently
-const processSingleIssue = async (issue) => {
-  // Check if we already processed this issue
-  const cacheKey = `issue-${issue.id}`;
-  if (issueCache.has(cacheKey)) {
-    return issueCache.get(cacheKey);
-  }
-  
-  // Quick check: if no parent, skip hierarchy check
+// Check if issue has exactly 1 level of parent hierarchy
+const checkOneLevelHierarchy = async (issue) => {
+  // Check if issue has a parent
   if (!issue.parent || !issue.parent.id) {
-    return null;
+    return false; // No parent, so not 1-level hierarchy
   }
   
   try {
     // Fetch parent issue
     const parentIssue = await cachedGetIssue(issue.parent.id);
-    if (!parentIssue) return null;
+    if (!parentIssue) return false;
     
-    // If parent has no parent, this is only 2-level, skip
+    // Check if parent has NO parent (making it 1 level deep)
     if (!parentIssue.parent || !parentIssue.parent.id) {
-      return null;
+      // Exactly 1 level deep: issue -> parent (and parent has no parent)
+      return true;
     }
     
-    // Fetch grandparent issue
-    const grandParentIssue = await cachedGetIssue(parentIssue.parent.id);
-    if (!grandParentIssue) return null;
+    // Parent has a parent, so it's more than 1 level
+    return false;
     
-    // Check if grandparent has no parent (true 3-level hierarchy)
-    if (!grandParentIssue.parent) {
-      const result = { ...issue, hierarchyValidated: true };
+  } catch (error) {
+    console.error(`Error checking 1-level hierarchy for issue ${issue.id}:`, error);
+    return false;
+  }
+};
+
+// Check if issue has exactly 2 levels of parent hierarchy
+const checkTwoLevelHierarchy = async (issue) => {
+  // Check if issue has a parent
+  if (!issue.parent || !issue.parent.id) {
+    return false; // No parent, so not 2-level hierarchy
+  }
+  
+  try {
+    // Fetch parent issue
+    const parentIssue = await cachedGetIssue(issue.parent.id);
+    if (!parentIssue) return false;
+    
+    // Check if parent has a parent (making it 2 levels deep)
+    if (parentIssue.parent && parentIssue.parent.id) {
+      // This is 2 levels deep: issue -> parent -> grandparent
+      // Fetch grandparent to confirm it doesn't have a parent (optional)
+      const grandParentIssue = await cachedGetIssue(parentIssue.parent.id);
+      if (grandParentIssue && grandParentIssue.parent) {
+        // If grandparent also has a parent, it's more than 2 levels
+        return false;
+      }
+      
+      // Exactly 2 levels deep
+      return true;
+    }
+    
+    // Parent has no parent, so it's only 1 level deep
+    return false;
+    
+  } catch (error) {
+    console.error(`Error checking 2-level hierarchy for issue ${issue.id}:`, error);
+    return false;
+  }
+};
+
+// Get ALL child issues (sub-issues) of a parent issue that are assigned to the same user
+const getSubIssuesForUser = async (parentIssue, currentUserId) => {
+  const cacheKey = `subissues-${parentIssue.id}-${currentUserId}`;
+  if (subIssuesCache.has(cacheKey)) {
+    return subIssuesCache.get(cacheKey);
+  }
+  
+  try {
+    console.log(`Looking for sub-issues of parent issue #${parentIssue.id} assigned to user ${currentUserId}`);
+    
+    // Get ALL issues assigned to the logged-in user
+    const userAssignedIssues = await getIssuesAssigned(currentUserId);
+    console.log(`Found ${userAssignedIssues.length} total issues assigned to user ${currentUserId}`);
+    
+    // Filter to find ALL sub-issues of this parent (direct children)
+    // DON'T filter by hierarchy level - include ALL child issues
+    const subIssues = [];
+    
+    for (const issue of userAssignedIssues) {
+      // Check if this issue is a direct child of the parent issue
+      if (issue.parent && issue.parent.id === parentIssue.id) {
+        console.log(`Found child issue #${issue.id} of parent #${parentIssue.id}`);
+        subIssues.push(issue);
+      }
+    }
+    
+    console.log(`Found ${subIssues.length} sub-issues for parent issue #${parentIssue.id}`);
+    
+    subIssuesCache.set(cacheKey, subIssues);
+    
+    // Cache for 5 minutes
+    setTimeout(() => {
+      subIssuesCache.delete(cacheKey);
+    }, 5 * 60 * 1000);
+    
+    return subIssues;
+  } catch (error) {
+    console.error(`Error getting sub-issues for parent ${parentIssue.id}:`, error);
+    return [];
+  }
+};
+
+// Calculate Actual Weight for a 1-Level Issue
+const calculateActualWeight = async (oneLevelIssue, currentUserId, selectedPeriod) => {
+  const issueWeight = getWeight(oneLevelIssue);
+  console.log(`Calculating actual weight for 1-level issue #${oneLevelIssue.id} (weight: ${issueWeight}) for period: ${selectedPeriod}`);
+  
+  // Get ALL sub-issues (child issues) assigned to the same user
+  const subIssues = await getSubIssuesForUser(oneLevelIssue, currentUserId);
+  
+  console.log(`Found ${subIssues.length} sub-issues for issue #${oneLevelIssue.id}`);
+  
+  if (subIssues.length === 0) {
+    // If no sub-issues assigned to user, actual weight = 0
+    console.log(`No sub-issues found for issue #${oneLevelIssue.id}, actual weight = 0`);
+    return {
+      issueWeight,
+      actualWeight: 0,
+      subIssuesCount: 0,
+      avgSubIssuesProgress: 0,
+      hasSubIssues: false
+    };
+  }
+  
+  // Calculate average of sub-issues progress percentages
+  let totalProgress = 0;
+  let validSubIssuesCount = 0;
+  const subIssuesDetails = [];
+  
+  subIssues.forEach((subIssue, index) => {
+    // Get progress for the selected period using the custom field
+    const progress = getProgressForPeriod(subIssue, selectedPeriod);
+    
+    console.log(`Sub-issue #${index + 1}: #${subIssue.id} - progress: ${progress}%`);
+    console.log(`  Sub-issue subject: ${subIssue.subject}`);
+    
+    totalProgress += progress;
+    validSubIssuesCount++;
+    
+    subIssuesDetails.push({
+      id: subIssue.id,
+      subject: subIssue.subject,
+      progress,
+      weight: getWeight(subIssue),
+      actualValue: getActualValue(subIssue, selectedPeriod),
+      targetValue: getTargetValue(subIssue, selectedPeriod)
+    });
+  });
+  
+  const avgSubIssuesProgress = validSubIssuesCount > 0 
+    ? totalProgress / validSubIssuesCount 
+    : 0;
+  
+  console.log(`Average sub-issues progress: ${avgSubIssuesProgress}%`);
+  
+  // Calculate Actual Weight = (Issue Weight × Avg Sub-Issues Progress) ÷ 100
+  const actualWeight = (issueWeight * avgSubIssuesProgress) / 100;
+  
+  console.log(`Actual weight calculation: (${issueWeight} × ${avgSubIssuesProgress}) ÷ 100 = ${actualWeight}`);
+  
+  return {
+    issueWeight,
+    actualWeight,
+    subIssuesCount: subIssues.length,
+    avgSubIssuesProgress,
+    hasSubIssues: true,
+    subIssuesDetails
+  };
+};
+
+// Process single issue efficiently with 1-level hierarchy check
+const processOneLevelIssue = async (issue) => {
+  const cacheKey = `issue-${issue.id}-1level`;
+  if (issueCache.has(cacheKey)) {
+    return issueCache.get(cacheKey);
+  }
+  
+  try {
+    const hasOneLevelHierarchy = await checkOneLevelHierarchy(issue);
+    
+    if (hasOneLevelHierarchy) {
+      const result = { ...issue, hierarchyLevel: 1 };
       issueCache.set(cacheKey, result);
       return result;
     }
     
     return null;
   } catch (error) {
-    console.error(`Error processing issue ${issue.id}:`, error);
+    console.error(`Error processing 1-level issue ${issue.id}:`, error);
     return null;
   }
 };
 
-// Batch process issues to minimize API calls
-const batchProcessIssues = async (issues, batchSize = 5) => {
+// Process single issue efficiently with 2-level hierarchy check
+const processTwoLevelIssue = async (issue) => {
+  const cacheKey = `issue-${issue.id}-2level`;
+  if (issueCache.has(cacheKey)) {
+    return issueCache.get(cacheKey);
+  }
+  
+  try {
+    const hasTwoLevelHierarchy = await checkTwoLevelHierarchy(issue);
+    
+    if (hasTwoLevelHierarchy) {
+      const result = { ...issue, hierarchyLevel: 2 };
+      issueCache.set(cacheKey, result);
+      return result;
+    }
+    
+    return null;
+  } catch (error) {
+    console.error(`Error processing 2-level issue ${issue.id}:`, error);
+    return null;
+  }
+};
+
+// Batch process issues for specific hierarchy level
+const batchProcessIssues = async (issues, processFunction, batchSize = 5) => {
   const results = [];
   
   for (let i = 0; i < issues.length; i += batchSize) {
     const batch = issues.slice(i, i + batchSize);
-    const batchPromises = batch.map(issue => processSingleIssue(issue));
+    const batchPromises = batch.map(issue => processFunction(issue));
     const batchResults = await Promise.all(batchPromises);
     results.push(...batchResults.filter(Boolean));
   }
@@ -395,15 +596,122 @@ const batchProcessIssues = async (issues, batchSize = 5) => {
   return results;
 };
 
+// Calculate 2-Level Hierarchy Performance (uses weighted average)
+const calculateTwoLevelHierarchyPerformance = (issues, period) => {
+  if (issues.length === 0) return 0;
+  
+  let totalWeight = 0;
+  let weightedProgress = 0;
+
+  issues.forEach((issue) => {
+    const weight = getWeight(issue);
+    const progress = getProgressForPeriod(issue, period); // Use custom field progress
+    totalWeight += weight;
+    weightedProgress += progress * weight;
+  });
+
+  return totalWeight > 0 ? Math.round(weightedProgress / totalWeight) : 0;
+};
+
+// Calculate 1-Level Hierarchy Performance using Actual Weight formula
+const calculateOneLevelHierarchyPerformance = async (oneLevelIssues, currentUserId, period) => {
+  if (oneLevelIssues.length === 0) return 0;
+  
+  let totalIssueWeight = 0;
+  let totalActualWeight = 0;
+  const issueDetails = [];
+  
+  console.log(`Calculating 1-level performance for ${oneLevelIssues.length} issues for period: ${period}`);
+  
+  // Calculate Actual Weight for each 1-Level Issue
+  for (const issue of oneLevelIssues) {
+    const issueWeight = getWeight(issue);
+    totalIssueWeight += issueWeight;
+    
+    console.log(`Processing 1-level issue #${issue.id} (weight: ${issueWeight})`);
+    
+    const actualWeightData = await calculateActualWeight(issue, currentUserId, period);
+    totalActualWeight += actualWeightData.actualWeight;
+    
+    issueDetails.push({
+      id: issue.id,
+      subject: issue.subject,
+      issueWeight,
+      actualWeight: actualWeightData.actualWeight,
+      subIssuesCount: actualWeightData.subIssuesCount,
+      avgSubIssuesProgress: actualWeightData.avgSubIssuesProgress,
+      hasSubIssues: actualWeightData.hasSubIssues,
+      subIssuesDetails: actualWeightData.subIssuesDetails || []
+    });
+    
+    console.log(`Issue #${issue.id}: weight=${issueWeight}, actualWeight=${actualWeightData.actualWeight}, subIssues=${actualWeightData.subIssuesCount}`);
+  }
+  
+  // Calculate performance: (Sum of Actual Weights × 100) / Sum of All Issue Weights
+  const performance = totalIssueWeight > 0 
+    ? Math.round((totalActualWeight * 100) / totalIssueWeight) 
+    : 0;
+  
+  console.log(`Total issue weight: ${totalIssueWeight}`);
+  console.log(`Total actual weight: ${totalActualWeight}`);
+  console.log(`1-Level performance: ${performance}%`);
+  
+  return {
+    performance,
+    totalIssueWeight,
+    totalActualWeight,
+    issueDetails
+  };
+};
+
+// Count how many 1-level issues have sub-issues assigned to the logged-in user
+const countOneLevelIssuesWithSubIssues = async (oneLevelIssues, currentUserId) => {
+  if (!oneLevelIssues || oneLevelIssues.length === 0 || !currentUserId) {
+    return 0;
+  }
+  
+  let count = 0;
+  
+  for (const issue of oneLevelIssues) {
+    try {
+      const subIssues = await getSubIssuesForUser(issue, currentUserId);
+      if (subIssues.length > 0) {
+        count++;
+      }
+    } catch (error) {
+      console.error(`Error checking sub-issues for issue ${issue.id}:`, error);
+      // Continue with next issue
+    }
+  }
+  
+  return count;
+};
+
 const Dashboard = () => {
-  const [issues, setIssues] = useState([]);
+  const [allAssignedIssues, setAllAssignedIssues] = useState([]);
+  const [oneLevelHierarchyIssues, setOneLevelHierarchyIssues] = useState([]);
+  const [twoLevelHierarchyIssues, setTwoLevelHierarchyIssues] = useState([]);
+  const [oneLevelPerformanceData, setOneLevelPerformanceData] = useState({
+    performance: 0,
+    totalIssueWeight: 0,
+    totalActualWeight: 0,
+    issueDetails: []
+  });
   const [user, setUser] = useState(null);
   const [selectedPeriod, setSelectedPeriod] = useState("Yearly");
   const [loading, setLoading] = useState(true);
+  const [initialLoading, setInitialLoading] = useState(true);
   const [error, setError] = useState(null);
   const [statuses, setStatuses] = useState([]);
   const [filterStatus, setFilterStatus] = useState("all");
   const [activeTab, setActiveTab] = useState("performance");
+  const [hierarchyInfo, setHierarchyInfo] = useState({
+    totalAssignedIssues: 0,
+    oneLevelHierarchyIssues: 0,
+    twoLevelHierarchyIssues: 0,
+    hierarchyValidated: false
+  });
+  const [oneLevelWithSubIssuesCount, setOneLevelWithSubIssuesCount] = useState(0);
 
   // Use refs to avoid unnecessary re-renders
   const abortControllerRef = useRef(null);
@@ -419,34 +727,131 @@ const Dashboard = () => {
     "9 Months"
   ];
 
-  // Simplified load function without progress tracking
-  const loadIssues = useCallback(async (userId) => {
+  // Load all issues assigned to the logged-in user
+  const loadAllAssignedIssues = useCallback(async (userId) => {
     if (!isMountedRef.current) return [];
     
     try {
-      // Get all issues
-      const allIssues = await getIssuesCreatedByUser(userId);
+      console.log("Fetching all issues assigned to user...");
       
-      if (allIssues.length === 0) return [];
+      // Try using getIssuesAssignedToMe first (uses assigned_to_id=me)
+      let assignedIssues = [];
+      try {
+        assignedIssues = await getIssuesAssignedToMe();
+        console.log(`Found ${assignedIssues.length} issues via assigned_to_id=me`);
+      } catch (error) {
+        console.warn("getIssuesAssignedToMe failed, trying by full name...", error);
+        
+        // Fallback to getIssuesAssignedToMeByFullName
+        assignedIssues = await getIssuesAssignedToMeByFullName();
+        console.log(`Found ${assignedIssues.length} issues via full name match`);
+      }
       
-      // Process all issues in batches
-      const validIssues = await batchProcessIssues(allIssues, 5);
+      if (assignedIssues.length === 0) {
+        console.log("No assigned issues found");
+      }
       
-      return validIssues;
+      return assignedIssues;
+      
     } catch (error) {
-      console.error("Error loading issues:", error);
+      console.error("Error loading assigned issues:", error);
       throw error;
     }
   }, []);
 
+  // Load both 1-level and 2-level hierarchy issues
+  const loadHierarchyIssues = useCallback(async (allIssues) => {
+    if (allIssues.length === 0) {
+      setHierarchyInfo(prev => ({
+        ...prev,
+        oneLevelHierarchyIssues: 0,
+        twoLevelHierarchyIssues: 0,
+        hierarchyValidated: true
+      }));
+      return { oneLevel: [], twoLevel: [] };
+    }
+    
+    console.log(`Processing ${allIssues.length} assigned issues for hierarchy levels...`);
+    
+    // Process all issues in parallel for both hierarchy levels
+    const [oneLevelIssues, twoLevelIssues] = await Promise.all([
+      batchProcessIssues(allIssues, processOneLevelIssue, 5),
+      batchProcessIssues(allIssues, processTwoLevelIssue, 5)
+    ]);
+    
+    console.log(`Found ${oneLevelIssues.length} issues with 1-level hierarchy`);
+    console.log(`Found ${twoLevelIssues.length} issues with 2-level hierarchy`);
+    
+    // Update hierarchy info
+    setHierarchyInfo(prev => ({
+      ...prev,
+      oneLevelHierarchyIssues: oneLevelIssues.length,
+      twoLevelHierarchyIssues: twoLevelIssues.length,
+      hierarchyValidated: true
+    }));
+    
+    return { oneLevel: oneLevelIssues, twoLevel: twoLevelIssues };
+  }, []);
+
+  // Calculate 1-Level Hierarchy Performance with Actual Weight
+  const calculateOneLevelPerformance = useCallback(async (oneLevelIssues, userId, period) => {
+    if (!oneLevelIssues || oneLevelIssues.length === 0 || !userId) {
+      return {
+        performance: 0,
+        totalIssueWeight: 0,
+        totalActualWeight: 0,
+        issueDetails: []
+      };
+    }
+    
+    try {
+      // Filter issues by period first
+      const filteredOneLevelIssues = filterIssuesByPeriod(oneLevelIssues, period);
+      console.log(`Filtered to ${filteredOneLevelIssues.length} 1-level issues for period: ${period}`);
+      
+      // Calculate 1-Level Performance using Actual Weight formula
+      const performanceData = await calculateOneLevelHierarchyPerformance(
+        filteredOneLevelIssues, 
+        userId, 
+        period
+      );
+      
+      return performanceData;
+    } catch (error) {
+      console.error("Error calculating 1-level performance:", error);
+      return {
+        performance: 0,
+        totalIssueWeight: 0,
+        totalActualWeight: 0,
+        issueDetails: []
+      };
+    }
+  }, []);
+
+  // Count 1-level issues with sub-issues assigned to user
+  const countOneLevelIssuesWithAssignedSubIssues = useCallback(async (oneLevelIssues, userId) => {
+    if (!oneLevelIssues || oneLevelIssues.length === 0 || !userId) {
+      return 0;
+    }
+    
+    try {
+      const count = await countOneLevelIssuesWithSubIssues(oneLevelIssues, userId);
+      return count;
+    } catch (error) {
+      console.error("Error counting 1-level issues with sub-issues:", error);
+      return 0;
+    }
+  }, []);
+
+  // Initial data load
   useEffect(() => {
     isMountedRef.current = true;
     abortControllerRef.current = new AbortController();
 
-    async function loadDashboardData() {
+    async function loadInitialDashboardData() {
       if (!isMountedRef.current) return;
       
-      setLoading(true);
+      setInitialLoading(true);
       setError(null);
       
       try {
@@ -454,28 +859,61 @@ const Dashboard = () => {
         const currentUser = await getCurrentUser();
         if (!currentUser) {
           setError("Failed to load user data");
-          setLoading(false);
+          setInitialLoading(false);
           return;
         }
 
         setUser(currentUser);
+        console.log(`Logged in as: ${currentUser.firstname} ${currentUser.lastname} (ID: ${currentUser.id})`);
         
-        // 2. Load issues
-        const validIssues = await loadIssues(currentUser.id);
+        // 2. Load all assigned issues
+        const allAssigned = await loadAllAssignedIssues(currentUser.id);
         
         if (!isMountedRef.current) return;
         
-        // 3. Extract unique statuses
+        // Update total count
+        setHierarchyInfo(prev => ({
+          ...prev,
+          totalAssignedIssues: allAssigned.length
+        }));
+        
+        setAllAssignedIssues(allAssigned);
+        
+        // 3. Load hierarchy issues
+        const { oneLevel, twoLevel } = await loadHierarchyIssues(allAssigned);
+        
+        if (!isMountedRef.current) return;
+        
+        setOneLevelHierarchyIssues(oneLevel);
+        setTwoLevelHierarchyIssues(twoLevel);
+        
+        // 4. Calculate 1-Level Hierarchy Performance with Actual Weight
+        const oneLevelPerformance = await calculateOneLevelPerformance(
+          oneLevel, 
+          currentUser.id, 
+          selectedPeriod
+        );
+        
+        setOneLevelPerformanceData(oneLevelPerformance);
+        
+        // 5. Count 1-level issues with sub-issues assigned to user
+        const withSubIssuesCount = await countOneLevelIssuesWithAssignedSubIssues(
+          oneLevel, 
+          currentUser.id
+        );
+        
+        setOneLevelWithSubIssuesCount(withSubIssuesCount);
+        
+        // 6. Extract unique statuses from all assigned issues
         const uniqueStatuses = Array.from(
           new Map(
-            validIssues
+            allAssigned
               .filter(issue => issue.status)
               .map(issue => [issue.status.id, issue.status])
           ).values()
         );
         
         setStatuses(uniqueStatuses);
-        setIssues(validIssues);
         
       } catch (error) {
         if (error.name !== 'AbortError') {
@@ -484,12 +922,13 @@ const Dashboard = () => {
         }
       } finally {
         if (isMountedRef.current) {
+          setInitialLoading(false);
           setLoading(false);
         }
       }
     }
 
-    loadDashboardData();
+    loadInitialDashboardData();
 
     return () => {
       isMountedRef.current = false;
@@ -497,11 +936,39 @@ const Dashboard = () => {
         abortControllerRef.current.abort();
       }
     };
-  }, [loadIssues]);
+  }, [loadAllAssignedIssues, loadHierarchyIssues, calculateOneLevelPerformance, countOneLevelIssuesWithAssignedSubIssues]);
 
-  // Memoized filtered issues - IMPORTANT: This should only include issues with valid targets
-  const filteredIssues = useMemo(() => {
-    let filtered = filterIssuesByPeriod(issues, selectedPeriod);
+  // Recalculate performance when period or filter changes
+  useEffect(() => {
+    if (initialLoading) return; // Skip if initial data hasn't loaded yet
+    
+    async function recalculatePerformance() {
+      setLoading(true);
+      
+      try {
+        if (user && oneLevelHierarchyIssues.length > 0) {
+          // Recalculate 1-Level Performance
+          const oneLevelPerformance = await calculateOneLevelPerformance(
+            oneLevelHierarchyIssues, 
+            user.id, 
+            selectedPeriod
+          );
+          
+          setOneLevelPerformanceData(oneLevelPerformance);
+        }
+      } catch (error) {
+        console.error("Error recalculating performance:", error);
+      } finally {
+        setLoading(false);
+      }
+    }
+    
+    recalculatePerformance();
+  }, [selectedPeriod, filterStatus, initialLoading, user, oneLevelHierarchyIssues, calculateOneLevelPerformance]);
+
+  // Memoized filtered issues for both hierarchy levels
+  const filteredOneLevelIssues = useMemo(() => {
+    let filtered = filterIssuesByPeriod(oneLevelHierarchyIssues, selectedPeriod);
     
     if (filterStatus !== "all") {
       filtered = filtered.filter(issue => {
@@ -513,89 +980,88 @@ const Dashboard = () => {
     }
     
     return filtered;
-  }, [issues, selectedPeriod, filterStatus]);
+  }, [oneLevelHierarchyIssues, selectedPeriod, filterStatus]);
 
-  // Calculate overall progress using the new mapProgress with issue parameter
-  const overallProgress = useMemo(() => {
-    if (filteredIssues.length === 0) return 0;
+  const filteredTwoLevelIssues = useMemo(() => {
+    let filtered = filterIssuesByPeriod(twoLevelHierarchyIssues, selectedPeriod);
     
-    let totalWeight = 0;
-    let weightedProgress = 0;
+    if (filterStatus !== "all") {
+      filtered = filtered.filter(issue => {
+        const matchesStatus = filterStatus === "all" || 
+          issue.status?.id?.toString() === filterStatus;
+        
+        return matchesStatus;
+      });
+    }
+    
+    return filtered;
+  }, [twoLevelHierarchyIssues, selectedPeriod, filterStatus]);
 
-    filteredIssues.forEach((issue) => {
-      const weight = getWeight(issue);
-      const progress = mapProgress(issue.done_ratio || 0, selectedPeriod, issue);
-      totalWeight += weight;
-      weightedProgress += progress * weight;
-    });
+  // Calculate 2-Level Hierarchy Performance (uses weighted average)
+  const twoLevelHierarchyPerformance = useMemo(() => {
+    return calculateTwoLevelHierarchyPerformance(filteredTwoLevelIssues, selectedPeriod);
+  }, [filteredTwoLevelIssues, selectedPeriod]);
 
-    return totalWeight > 0 ? Math.round(weightedProgress / totalWeight) : 0;
-  }, [filteredIssues, selectedPeriod]);
-
-  // Prepare chart data - ONLY include issues with valid targets
+  // Prepare chart data for 2-level hierarchy issues (showing 2-level in detailed analysis)
   const chartData = useMemo(() => {
     const chartDataMap = new Map();
     
-    filteredIssues.forEach((issue) => {
-      // Double-check that this issue has a valid target for the selected period
+    filteredTwoLevelIssues.forEach((issue) => {
       const targetValue = getTargetValue(issue, selectedPeriod);
       if (!isValidTargetValue(targetValue, selectedPeriod)) {
-        // Skip this issue if it doesn't have a valid target
         return;
       }
       
       if (!chartDataMap.has(issue.id)) {
         const assignedTo = issue.assigned_to?.name || "Unassigned";
         const projectName = issue.project?.name || "No Project";
-        const validQuartersList = getValidQuartersList(issue);
-        const validQuartersCount = validQuartersList.length;
         
         const displayText = `#${issue.id}: ${issue.subject}`;
         const truncatedDisplay = displayText.length > 60 
           ? displayText.substring(0, 57) + "..." 
           : displayText;
         
-        const progress = mapProgress(issue.done_ratio || 0, selectedPeriod, issue);
+        const progress = getProgressForPeriod(issue, selectedPeriod);
+        const actualValue = getActualValue(issue, selectedPeriod);
         
         chartDataMap.set(issue.id, {
           id: issue.id,
           name: truncatedDisplay,
           fullName: issue.subject,
           progress: progress,
+          actualValue: actualValue,
+          targetValue: targetValue,
           status: issue.status?.name,
           assignedTo: assignedTo,
           project: projectName,
           tracker: issue.tracker?.name || "Unknown",
-          doneRatio: issue.done_ratio || 0,
           parentId: issue.parent?.id,
           color: getProgressColor(progress),
-          validQuartersCount: validQuartersCount,
-          validQuartersList: validQuartersList,
-          targetValue: targetValue,
-          quarterDistribution: getQuarterDistributionInfo(issue, selectedPeriod)
+          hierarchyLevel: issue.hierarchyLevel || 2
         });
       }
     });
 
     const data = Array.from(chartDataMap.values());
     return data.sort((a, b) => b.progress - a.progress);
-  }, [filteredIssues, selectedPeriod]);
+  }, [filteredTwoLevelIssues, selectedPeriod]);
 
   // Dynamic chart height
   const chartHeight = Math.max(400, chartData.length * 60);
 
-  // Prepare table data - ONLY include issues with valid targets (same as chart)
+  // Prepare table data for 2-level hierarchy issues
   const tableData = useMemo(() => {
-    // Filter issues to ensure they have valid targets (same logic as chart)
-    const validIssues = filteredIssues.filter(issue => {
+    const validIssues = filteredTwoLevelIssues.filter(issue => {
       const targetValue = getTargetValue(issue, selectedPeriod);
       return isValidTargetValue(targetValue, selectedPeriod);
     });
     
     return validIssues.map(issue => {
       const targetValue = getTargetValue(issue, selectedPeriod);
-      const achievement = mapProgress(issue.done_ratio || 0, selectedPeriod, issue);
+      const progress = getProgressForPeriod(issue, selectedPeriod);
       const weight = getWeight(issue);
+      const actualValue = getActualValue(issue, selectedPeriod);
+      const targetValueNum = parseFloat(targetValue) || 0;
       
       return {
         id: issue.id,
@@ -603,34 +1069,73 @@ const Dashboard = () => {
         status: issue.status?.name || "Unknown",
         assignedTo: issue.assigned_to?.name || "Unassigned",
         targetValue: targetValue,
-        progress: achievement,
+        actualValue: actualValue.toFixed(2),
+        progress: progress,
         weight: weight,
-        doneRatio: issue.done_ratio || 0,
         tracker: issue.tracker?.name || "Unknown",
-        hasValidTarget: true
+        hasValidTarget: true,
+        hierarchyLevel: issue.hierarchyLevel || 2
       };
     });
-  }, [filteredIssues, selectedPeriod]);
+  }, [filteredTwoLevelIssues, selectedPeriod]);
 
   const handleRefresh = async () => {
     // Clear caches
     issueCache.clear();
+    subIssuesCache.clear();
     
     setLoading(true);
-    setIssues([]); // Clear existing issues
+    setAllAssignedIssues([]);
+    setOneLevelHierarchyIssues([]);
+    setTwoLevelHierarchyIssues([]);
+    setOneLevelPerformanceData({
+      performance: 0,
+      totalIssueWeight: 0,
+      totalActualWeight: 0,
+      issueDetails: []
+    });
+    setHierarchyInfo({
+      totalAssignedIssues: 0,
+      oneLevelHierarchyIssues: 0,
+      twoLevelHierarchyIssues: 0,
+      hierarchyValidated: false
+    });
+    setOneLevelWithSubIssuesCount(0);
     
     try {
       const currentUser = await getCurrentUser();
       if (!currentUser) return;
       
       setUser(currentUser);
-      const validIssues = await loadIssues(currentUser.id);
-      setIssues(validIssues);
+      
+      // Reload all data
+      const allAssigned = await loadAllAssignedIssues(currentUser.id);
+      setAllAssignedIssues(allAssigned);
+      
+      const { oneLevel, twoLevel } = await loadHierarchyIssues(allAssigned);
+      setOneLevelHierarchyIssues(oneLevel);
+      setTwoLevelHierarchyIssues(twoLevel);
+      
+      // Recalculate 1-Level Performance
+      const oneLevelPerformance = await calculateOneLevelPerformance(
+        oneLevel, 
+        currentUser.id, 
+        selectedPeriod
+      );
+      setOneLevelPerformanceData(oneLevelPerformance);
+      
+      // Count 1-level issues with sub-issues assigned to user
+      const withSubIssuesCount = await countOneLevelIssuesWithAssignedSubIssues(
+        oneLevel, 
+        currentUser.id
+      );
+      
+      setOneLevelWithSubIssuesCount(withSubIssuesCount);
       
       // Update statuses
       const uniqueStatuses = Array.from(
         new Map(
-          validIssues
+          allAssigned
             .filter(issue => issue.status)
             .map(issue => [issue.status.id, issue.status])
         ).values()
@@ -721,13 +1226,16 @@ const Dashboard = () => {
         <select
           value={selectedPeriod}
           onChange={(e) => setSelectedPeriod(e.target.value)}
+          disabled={loading}
           style={{
             padding: '10px',
             borderRadius: '6px',
             border: '2px solid #ddd',
             backgroundColor: '#fff',
             fontWeight: 'bold',
-            fontSize: '14px'
+            fontSize: '14px',
+            opacity: loading ? 0.7 : 1,
+            cursor: loading ? 'not-allowed' : 'pointer'
           }}
         >
           {periodOptions.map(period => (
@@ -743,12 +1251,15 @@ const Dashboard = () => {
         <select
           value={filterStatus}
           onChange={(e) => setFilterStatus(e.target.value)}
+          disabled={loading}
           style={{
             padding: '10px',
             borderRadius: '6px',
             border: '2px solid #ddd',
             backgroundColor: '#fff',
-            fontSize: '14px'
+            fontSize: '14px',
+            opacity: loading ? 0.7 : 1,
+            cursor: loading ? 'not-allowed' : 'pointer'
           }}
         >
           <option value="all">All Statuses</option>
@@ -763,27 +1274,28 @@ const Dashboard = () => {
       <div style={{ marginLeft: 'auto' }}>
         <button
           onClick={handleRefresh}
+          disabled={loading}
           style={{
             padding: '10px 20px',
-            backgroundColor: '#f5f5f5',
+            backgroundColor: loading ? '#f0f0f0' : '#f5f5f5',
             border: '1px solid #ddd',
             borderRadius: '6px',
-            cursor: 'pointer',
+            cursor: loading ? 'not-allowed' : 'pointer',
             display: 'flex',
             alignItems: 'center',
             gap: '8px',
             fontWeight: 'bold',
-            fontSize: '14px'
-          }}
-        >
-          🔄 Refresh Data
+            fontSize: '14px',
+            opacity: loading ? 0.7 : 1
+          }}>
+          {loading ? '🔄 Calculating...' : '🔄 Refresh Data'}
         </button>
       </div>
     </div>
   );
 
   // Simplified loading component
-  if (loading) {
+  if (initialLoading) {
     return (
       <div style={{
         display: 'flex',
@@ -804,6 +1316,19 @@ const Dashboard = () => {
         <p style={{ fontSize: '18px', color: '#666' }}>
           Loading dashboard data...
         </p>
+        {hierarchyInfo.totalAssignedIssues > 0 && !hierarchyInfo.hierarchyValidated && (
+          <div style={{
+            marginTop: '20px',
+            padding: '10px 20px',
+            backgroundColor: '#e3f2fd',
+            borderRadius: '8px',
+            fontSize: '14px',
+            color: '#1565c0'
+          }}>
+            <p>Found {hierarchyInfo.totalAssignedIssues} assigned issues</p>
+            <p>Calculating Actual Weight for 1-Level Issues...</p>
+          </div>
+        )}
         <style>{`
           @keyframes spin {
             0% { transform: rotate(0deg); }
@@ -814,7 +1339,7 @@ const Dashboard = () => {
     );
   }
 
-  if (error && issues.length === 0) {
+  if (error && allAssignedIssues.length === 0) {
     return (
       <div style={{
         display: 'flex',
@@ -849,7 +1374,7 @@ const Dashboard = () => {
   return (
     <div style={{ width: "100%", fontFamily: "Arial, sans-serif", padding: "20px", maxWidth: "1400px", margin: "0 auto" }}>
       
-      {/* Header - Simplified */}
+      {/* Header */}
       <div style={{
         display: 'flex',
         justifyContent: 'space-between',
@@ -858,66 +1383,29 @@ const Dashboard = () => {
         flexWrap: 'wrap',
         gap: '20px'
       }}>
-        <h1 style={{ margin: 0, color: '#333' }}>My Issues Dashboard</h1>
+        <div>
+          <h1 style={{ margin: 0, color: '#333', display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <span style={{ fontSize: '28px' }}>📊</span>
+            Dashboard
+          </h1>
+        </div>
         <div style={{ 
           fontSize: '14px', 
           color: '#666', 
           backgroundColor: '#f0f7ff',
           padding: '8px 16px',
           borderRadius: '20px',
-          fontWeight: '500'
+          fontWeight: '500',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '10px'
         }}>
+          <span style={{ fontSize: '18px' }}>👤</span>
           {user && `${user.firstname} ${user.lastname}`}
         </div>
       </div>
 
-      {/* Period Info Banner */}
-      <div style={{
-        backgroundColor: '#e3f2fd',
-        padding: '10px 15px',
-        borderRadius: '8px',
-        marginBottom: '20px',
-        borderLeft: '4px solid #1976d2'
-      }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div>
-            <strong>Active Period:</strong> {selectedPeriod}
-            {selectedPeriod === "Yearly" && " (የዓመቱ እቅድ)"}
-            {selectedPeriod === "6 Months" && " (1ኛ ሩብዓመት + 2ኛ ሩብዓመት)"}
-            {selectedPeriod === "9 Months" && " (1ኛ ሩብዓመት + 2ኛ ሩብዓመት + 3ኛ ሩብዓመት)"}
-            {selectedPeriod.includes("ሩብዓመት") && " • Smart quarter mapping active"}
-          </div>
-          <div style={{ fontSize: '12px', color: '#666' }}>
-            {issues.length} total issues • {filteredIssues.length} with valid {selectedPeriod} targets
-          </div>
-        </div>
-      </div>
-
-      {/* Debug Info - Shows filtering criteria */}
-      <div style={{
-        backgroundColor: '#f0f7ff',
-        padding: '10px 15px',
-        borderRadius: '8px',
-        marginBottom: '20px',
-        borderLeft: '4px solid #1976d2',
-        fontSize: '12px',
-        color: '#333'
-      }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div>
-            <strong>Filtering Criteria:</strong> 
-            {selectedPeriod === "Yearly" && " Showing ONLY issues with valid 'የዓመቱ እቅድ' value"}
-            {selectedPeriod === "6 Months" && " Showing ONLY issues with valid Q1 OR Q2 value"}
-            {selectedPeriod === "9 Months" && " Showing ONLY issues with valid Q1 OR Q2 OR Q3 value"}
-            {selectedPeriod.includes("ሩብዓመት") && ` Showing ONLY issues with valid '${selectedPeriod}' value`}
-          </div>
-          <div style={{ fontSize: '11px', color: '#666' }}>
-            Chart: {chartData.length} issues • Table: {tableData.length} issues
-          </div>
-        </div>
-      </div>
-
-      {/* Stats Cards */}
+      {/* Summary Cards */}
       <div style={{
         display: 'grid',
         gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
@@ -929,11 +1417,12 @@ const Dashboard = () => {
           backgroundColor: '#fff',
           borderRadius: '8px',
           boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-          borderLeft: '4px solid #2196F3'
+          borderLeft: '4px solid #2196F3',
+          opacity: loading ? 0.7 : 1
         }}>
-          <div style={{ fontSize: '12px', color: '#666', marginBottom: '5px' }}>Total Issues</div>
-          <div style={{ fontSize: '28px', fontWeight: 'bold', color: '#2196F3' }}>{issues.length}</div>
-          <div style={{ fontSize: '11px', color: '#888', marginTop: '5px' }}>All created issues</div>
+          <div style={{ fontSize: '12px', color: '#666', marginBottom: '5px' }}>Total assigned ዝርዝር ተግባራት</div>
+          <div style={{ fontSize: '28px', fontWeight: 'bold', color: '#2196F3' }}>{oneLevelHierarchyIssues.length}</div>
+          <div style={{ fontSize: '11px', color: '#888', marginTop: '5px' }}>Issue → Parent (no further parent)</div>
         </div>
 
         <div style={{
@@ -941,11 +1430,12 @@ const Dashboard = () => {
           backgroundColor: '#fff',
           borderRadius: '8px',
           boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-          borderLeft: '4px solid #9C27B0'
+          borderLeft: '4px solid #9C27B0',
+          opacity: loading ? 0.7 : 1
         }}>
-          <div style={{ fontSize: '12px', color: '#666', marginBottom: '5px' }}>Filtered Issues</div>
-          <div style={{ fontSize: '28px', fontWeight: 'bold', color: '#9C27B0' }}>{filteredIssues.length}</div>
-          <div style={{ fontSize: '11px', color: '#888', marginTop: '5px' }}>For {selectedPeriod}</div>
+          <div style={{ fontSize: '12px', color: '#666', marginBottom: '5px' }}>Total የግል እቅድ ያላቸው assigned ዝርዝር ተግባራት</div>
+          <div style={{ fontSize: '28px', fontWeight: 'bold', color: '#9C27B0' }}>{oneLevelWithSubIssuesCount}</div>
+          <div style={{ fontSize: '11px', color: '#888', marginTop: '5px' }}>1-Level issues with sub-issues assigned to you</div>
         </div>
 
         <div style={{
@@ -953,13 +1443,12 @@ const Dashboard = () => {
           backgroundColor: '#fff',
           borderRadius: '8px',
           boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-          borderLeft: '4px solid #4CAF50'
+          borderLeft: '4px solid #4CAF50',
+          opacity: loading ? 0.7 : 1
         }}>
-          <div style={{ fontSize: '12px', color: '#666', marginBottom: '5px' }}>Overall Progress</div>
-          <div style={{ fontSize: '28px', fontWeight: 'bold', color: getProgressColor(overallProgress) }}>
-            {overallProgress}%
-          </div>
-          <div style={{ fontSize: '11px', color: '#888', marginTop: '5px' }}>Weighted average</div>
+          <div style={{ fontSize: '12px', color: '#666', marginBottom: '5px' }}>Total የግል እቅድ</div>
+          <div style={{ fontSize: '28px', fontWeight: 'bold', color: '#4CAF50' }}>{twoLevelHierarchyIssues.length}</div>
+          <div style={{ fontSize: '11px', color: '#888', marginTop: '5px' }}>Issue → Parent → Grandparent</div>
         </div>
       </div>
 
@@ -986,193 +1475,248 @@ const Dashboard = () => {
             gap: '10px'
           }}>
             <span style={{ fontSize: '24px' }}>📊</span>
-            Weighted Overall Performance
+            Performance Overview
+            {loading && (
+              <span style={{
+                fontSize: '12px',
+                color: '#666',
+                backgroundColor: '#e3f2fd',
+                padding: '2px 8px',
+                borderRadius: '10px',
+                marginLeft: '10px'
+              }}>
+                Calculating...
+              </span>
+            )}
           </h2>
           
           {/* Filter Controls in Performance Tab */}
           <FilterControls />
           
-          {/* Overall Progress Bar - Enhanced */}
+          {/* Dual Performance Bars */}
           <div style={{ marginBottom: '40px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
-              <div style={{ fontWeight: "bold", fontSize: "20px", color: '#333' }}>
-                Performance Score: {overallProgress}%
-              </div>
-              <div style={{ 
-                fontSize: '14px', 
-                color: '#666', 
-                backgroundColor: '#f0f7ff',
-                padding: '5px 10px',
-                borderRadius: '20px',
-                fontWeight: '500'
-              }}>
-                Based on {filteredIssues.length} issues with weights
-              </div>
-            </div>
-            
-            <div style={{
-              width: "100%",
-              backgroundColor: "#f0f0f0",
-              borderRadius: "12px",
-              overflow: "hidden",
-              height: "35px",
-              position: 'relative',
-              boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.1)'
+            <h3 style={{ 
+              marginBottom: '20px', 
+              color: '#333', 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: '10px'
             }}>
-              <div
-                style={{
-                  width: `${overallProgress || 0}%`,
-                  backgroundColor: getProgressColor(overallProgress),
-                  height: "100%",
-                  textAlign: "center",
-                  color: "#fff",
-                  fontWeight: "bold",
-                  lineHeight: "35px",
-                  transition: 'width 0.8s ease',
-                  position: 'relative',
-                  overflow: 'hidden'
-                }}
-              >
-                <div style={{
-                  position: 'absolute',
-                  right: '10px',
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  fontWeight: 'bold',
-                  fontSize: '14px'
-                }}>
-                  {overallProgress}%
-                </div>
-              </div>
-            </div>
-            
-            {/* Progress Indicators */}
-            <div style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              marginTop: '10px',
-              padding: '0 5px'
-            }}>
-              <span style={{ fontSize: '12px', color: '#666' }}>0%</span>
-              <span style={{ fontSize: '12px', color: '#666' }}>25%</span>
-              <span style={{ fontSize: '12px', color: '#666' }}>50%</span>
-              <span style={{ fontSize: '12px', color: '#666' }}>75%</span>
-              <span style={{ fontSize: '12px', color: '#666' }}>100%</span>
-            </div>
-          </div>
-
-          {/* Performance Summary */}
-          <div style={{
-            backgroundColor: '#f8f9fa',
-            padding: '20px',
-            borderRadius: '8px',
-            marginBottom: '30px',
-            borderLeft: '4px solid #4CAF50'
-          }}>
-            <h3 style={{ color: '#333', marginBottom: '15px', display: 'flex', alignItems: 'center', gap: '10px' }}>
               <span style={{ fontSize: '20px' }}>📈</span>
-              Performance Summary
+              Performance Comparison
             </h3>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '15px' }}>
-              <div style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: '12px', color: '#666', marginBottom: '5px' }}>Target Period</div>
-                <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#1976d2' }}>{selectedPeriod}</div>
-              </div>
-              <div style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: '12px', color: '#666', marginBottom: '5px' }}>Weighted Issues</div>
-                <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#9C27B0' }}>
-                  {tableData.reduce((sum, row) => sum + row.weight, 0)}
+            
+            {/* 1-Level Hierarchy Issues Performance - Changed text */}
+            <div style={{ marginBottom: '30px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                <div style={{ fontWeight: "bold", fontSize: "16px", color: '#333', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <div style={{ width: '12px', height: '12px', backgroundColor: '#2196F3', borderRadius: '2px' }}></div>
+                  Performance based on assigned ዝርዝር ተግባራት
                 </div>
-              </div>
-              <div style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: '12px', color: '#666', marginBottom: '5px' }}>Avg Target Value</div>
-                <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#2196F3' }}>
-                  {tableData.length > 0 
-                    ? (tableData
-                        .reduce((sum, row) => sum + parseFloat(row.targetValue || 0), 0) / 
-                      tableData.length).toFixed(2)
-                    : '0'}
-                </div>
-              </div>
-              <div style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: '12px', color: '#666', marginBottom: '5px' }}>Performance Grade</div>
                 <div style={{ 
-                  fontSize: '18px', 
-                  fontWeight: 'bold', 
-                  color: overallProgress >= 75 ? '#4CAF50' : 
-                         overallProgress >= 50 ? '#FF9800' : '#F44336'
+                  fontSize: '14px', 
+                  color: '#666', 
+                  backgroundColor: '#e3f2fd',
+                  padding: '4px 10px',
+                  borderRadius: '20px',
+                  fontWeight: '500',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '5px'
                 }}>
-                  {overallProgress >= 75 ? 'Excellent' : 
-                   overallProgress >= 50 ? 'Good' : 
-                   overallProgress > 0 ? 'Needs Improvement' : 'Not Started'}
+                  {loading ? (
+                    <>
+                      <div style={{
+                        width: '12px',
+                        height: '12px',
+                        border: '2px solid #f3f3f3',
+                        borderTop: '2px solid #3498db',
+                        borderRadius: '50%',
+                        animation: 'spin 1s linear infinite'
+                      }}></div>
+                      Calculating...
+                    </>
+                  ) : (
+                    `${oneLevelPerformanceData.performance}% • ${filteredOneLevelIssues.length} issues`
+                  )}
+                </div>
+              </div>
+              
+              <div style={{
+                width: "100%",
+                backgroundColor: "#f0f0f0",
+                borderRadius: "8px",
+                overflow: "hidden",
+                height: "30px",
+                position: 'relative'
+              }}>
+                <div
+                  style={{
+                    width: `${oneLevelPerformanceData.performance || 0}%`,
+                    backgroundColor: '#2196F3',
+                    height: "100%",
+                    textAlign: "center",
+                    color: "#fff",
+                    fontWeight: "bold",
+                    lineHeight: "30px",
+                    transition: 'width 0.8s ease',
+                    position: 'relative'
+                  }}
+                >
+                  <div style={{
+                    position: 'absolute',
+                    right: '10px',
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    fontWeight: 'bold',
+                    fontSize: '12px'
+                  }}>
+                    {oneLevelPerformanceData.performance}%
+                  </div>
+                </div>
+              </div>
+              
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                marginTop: '5px',
+                padding: '0 5px',
+                fontSize: '11px',
+                color: '#666'
+              }}>
+                <span>Formula: Actual Weight = (Issue Weight × Avg Sub-Issues Progress %) ÷ 100</span>
+                <span>Performance = (∑Actual Weight × 100) ÷ ∑Issue Weight</span>
+              </div>
+              
+              <div style={{
+                marginTop: '10px',
+                padding: '10px',
+                backgroundColor: '#f9f9f9',
+                borderRadius: '6px',
+                fontSize: '11px',
+                color: '#666',
+                borderLeft: '3px solid #2196F3'
+              }}>
+                <strong>Calculation Formulas:</strong>
+                <div style={{ marginTop: '5px' }}>
+                  Yearly: ((Q1_actual + Q2_actual + Q3_actual + Q4_actual) × 100) ÷ yearly_target
+                </div>
+                <div>
+                  Quarterly: (quarter_actual × 100) ÷ quarter_target
+                </div>
+              </div>
+              
+              {/* 1-Level Performance Details - Changed text */}
+              <div style={{
+                marginTop: '15px',
+                padding: '15px',
+                backgroundColor: '#f8f9fa',
+                borderRadius: '8px',
+                border: '1px solid #e0e0e0'
+              }}>
+                <div style={{ fontSize: '13px', fontWeight: 'bold', marginBottom: '10px', color: '#333' }}>
+                  Performance Calculation Details:
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '10px', fontSize: '12px' }}>
+                  <div>
+                    <span style={{ color: '#666' }}>Total Issue Weight:</span>
+                    <span style={{ fontWeight: 'bold', marginLeft: '5px' }}>
+                      {oneLevelPerformanceData.totalIssueWeight.toFixed(2)}
+                    </span>
+                  </div>
+                  <div>
+                    <span style={{ color: '#666' }}>Total Actual Weight:</span>
+                    <span style={{ fontWeight: 'bold', marginLeft: '5px' }}>
+                      {oneLevelPerformanceData.totalActualWeight.toFixed(2)}
+                    </span>
+                  </div>
+                  <div>
+                    <span style={{ color: '#666' }}>Weight Ratio:</span>
+                    <span style={{ fontWeight: 'bold', marginLeft: '5px' }}>
+                      {oneLevelPerformanceData.totalIssueWeight > 0 
+                        ? Math.round((oneLevelPerformanceData.totalActualWeight / oneLevelPerformanceData.totalIssueWeight) * 100) 
+                        : 0}%
+                    </span>
+                  </div>
+                  <div>
+                    <span style={{ color: '#666' }}>Filtered Issues:</span>
+                    <span style={{ fontWeight: 'bold', marginLeft: '5px' }}>
+                      {filteredOneLevelIssues.length}
+                    </span>
+                  </div>
+                  <div>
+                    <span style={{ color: '#666' }}>Data Source:</span>
+                    <span style={{ fontWeight: 'bold', marginLeft: '5px' }}>
+                      አፈጻጸም Custom Fields
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-
-          {/* Quick Stats */}
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
-            gap: '20px'
-          }}>
-            <div style={{
-              padding: '20px',
-              backgroundColor: '#fff',
-              borderRadius: '8px',
-              boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
-              border: '1px solid #e0e0e0'
-            }}>
-              <h4 style={{ color: '#333', marginBottom: '15px', display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <span style={{ fontSize: '18px' }}>⚡</span>
-                Quick Stats
-              </h4>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0' }}>
-                  <span style={{ color: '#666' }}>Total Weight:</span>
-                  <span style={{ fontWeight: 'bold' }}>{tableData.reduce((sum, row) => sum + row.weight, 0)}</span>
+            
+            {/* 2-Level Hierarchy Issues Performance - Changed text */}
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                <div style={{ fontWeight: "bold", fontSize: "16px", color: '#333', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <div style={{ width: '12px', height: '12px', backgroundColor: '#9C27B0', borderRadius: '2px' }}></div>
+                  Performance based on assigned የግል እቅድ
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0' }}>
-                  <span style={{ color: '#666' }}>Average Progress:</span>
-                  <span style={{ fontWeight: 'bold', color: getProgressColor(overallProgress) }}>
-                    {overallProgress}%
-                  </span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0' }}>
-                  <span style={{ color: '#666' }}>Completion Rate:</span>
-                  <span style={{ fontWeight: 'bold', color: getProgressColor(overallProgress) }}>
-                    {overallProgress}%
-                  </span>
+                <div style={{ 
+                  fontSize: '14px', 
+                  color: '#666', 
+                  backgroundColor: '#f3e5f5',
+                  padding: '4px 10px',
+                  borderRadius: '20px',
+                  fontWeight: '500'
+                }}>
+                  {twoLevelHierarchyPerformance}% • {filteredTwoLevelIssues.length} issues
                 </div>
               </div>
-            </div>
-
-            <div style={{
-              padding: '20px',
-              backgroundColor: '#fff',
-              borderRadius: '8px',
-              boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
-              border: '1px solid #e0e0e0'
-            }}>
-              <h4 style={{ color: '#333', marginBottom: '15px', display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <span style={{ fontSize: '18px' }}>🎯</span>
-                Period Targets
-              </h4>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0' }}>
-                  <span style={{ color: '#666' }}>Selected Period:</span>
-                  <span style={{ fontWeight: 'bold', color: '#1976d2' }}>{selectedPeriod}</span>
+              
+              <div style={{
+                width: "100%",
+                backgroundColor: "#f0f0f0",
+                borderRadius: "8px",
+                overflow: "hidden",
+                height: "30px",
+                position: 'relative'
+              }}>
+                <div
+                  style={{
+                    width: `${twoLevelHierarchyPerformance || 0}%`,
+                    backgroundColor: '#9C27B0',
+                    height: "100%",
+                    textAlign: "center",
+                    color: "#fff",
+                    fontWeight: "bold",
+                    lineHeight: "30px",
+                    transition: 'width 0.8s ease',
+                    position: 'relative'
+                  }}
+                >
+                  <div style={{
+                    position: 'absolute',
+                    right: '10px',
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    fontWeight: 'bold',
+                    fontSize: '12px'
+                  }}>
+                    {twoLevelHierarchyPerformance}%
+                  </div>
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0' }}>
-                  <span style={{ color: '#666' }}>Filtered Issues:</span>
-                  <span style={{ fontWeight: 'bold' }}>{filteredIssues.length}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0' }}>
-                  <span style={{ color: '#666' }}>Valid Targets:</span>
-                  <span style={{ fontWeight: 'bold' }}>
-                    {tableData.length}
-                  </span>
-                </div>
+              </div>
+              
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                marginTop: '5px',
+                padding: '0 5px',
+                fontSize: '11px',
+                color: '#666'
+              }}>
+                <span>Uses weighted average based on issue weights</span>
+                <span>Performance = (∑(Weight × Progress %) ÷ ∑Weight) × 100</span>
               </div>
             </div>
           </div>
@@ -1196,13 +1740,25 @@ const Dashboard = () => {
             gap: '10px'
           }}>
             <span style={{ fontSize: '24px' }}>🔍</span>
-            Detailed Analysis
+            Detailed Analysis of የግል እቅድ
+            {loading && (
+              <span style={{
+                fontSize: '12px',
+                color: '#666',
+                backgroundColor: '#e3f2fd',
+                padding: '2px 8px',
+                borderRadius: '10px',
+                marginLeft: '10px'
+              }}>
+                Calculating...
+              </span>
+            )}
           </h2>
 
           {/* Filter Controls in Analysis Tab */}
           <FilterControls />
 
-          {/* Chart Section - UPDATED VERTICAL BAR CHART */}
+          {/* Chart Section */}
           {chartData.length === 0 ? (
             <div style={{ 
               textAlign: "center", 
@@ -1214,8 +1770,8 @@ const Dashboard = () => {
               marginBottom: '30px'
             }}>
               <div style={{ fontSize: '48px', marginBottom: '20px' }}>📊</div>
-              <h3>No Issues Match the Selected Criteria</h3>
-              <p>Try changing the period or status filter to see your issues.</p>
+              <h3>No የግል እቅድ Match the Selected Criteria</h3>
+              <p>Try changing the period or status filter to see your assigned issues.</p>
             </div>
           ) : (
             <div style={{ marginBottom: '40px' }}>
@@ -1229,7 +1785,7 @@ const Dashboard = () => {
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                   <span style={{ fontSize: '20px' }}>📊</span>
-                  Issues Progress ({selectedPeriod})
+                  የግል እቅድ Progress ({selectedPeriod})
                 </div>
                 <span style={{ 
                   fontSize: '14px', 
@@ -1239,11 +1795,11 @@ const Dashboard = () => {
                   padding: '5px 10px',
                   borderRadius: '20px'
                 }}>
-                  Showing {chartData.length} issues with valid targets • Sorted by progress
+                  Showing {chartData.length} issues • Performance: {twoLevelHierarchyPerformance}%
                 </span>
               </h3>
               
-              {/* Container with better spacing for vertical chart */}
+              {/* Chart container */}
               <div style={{ 
                 height: chartHeight,
                 backgroundColor: 'white',
@@ -1265,7 +1821,6 @@ const Dashboard = () => {
                       vertical={false} 
                     />
                     
-                    {/* YAxis for issue names (on the left side) */}
                     <YAxis 
                       type="category" 
                       dataKey="name" 
@@ -1274,7 +1829,6 @@ const Dashboard = () => {
                       axisLine={{ stroke: '#ddd' }}
                       tickLine={{ stroke: '#ddd' }}
                       tickFormatter={(value) => {
-                        // Clean up the truncated text for display
                         if (value.includes("...")) {
                           return value;
                         }
@@ -1282,7 +1836,6 @@ const Dashboard = () => {
                       }}
                     />
                     
-                    {/* XAxis for percentages */}
                     <XAxis 
                       type="number" 
                       domain={[0, 100]} 
@@ -1297,12 +1850,10 @@ const Dashboard = () => {
                       }}
                     />
                     
-                    {/* Tooltip with enhanced information */}
                     <Tooltip 
                       content={({ active, payload }) => {
                         if (active && payload && payload.length) {
                           const data = payload[0].payload;
-                          const quarterInfo = data.quarterDistribution;
                           
                           return (
                             <div style={{
@@ -1322,8 +1873,27 @@ const Dashboard = () => {
                                 marginBottom: '10px',
                                 color: '#1976d2'
                               }}>
-                                Issue #{data.id}
+                                Issue #{data.id} (የግል እቅድ)
                               </div>
+                              
+                              {/* Hierarchy Info */}
+                              <div style={{
+                                marginBottom: '10px',
+                                padding: '8px',
+                                backgroundColor: '#e3f2fd',
+                                borderRadius: '6px',
+                                fontSize: '12px',
+                                borderLeft: '3px solid #1976d2'
+                              }}>
+                                <div style={{ fontWeight: 'bold', color: '#1976d2' }}>
+                                  <span style={{ fontSize: '14px', marginRight: '5px' }}>↳↳</span>
+                                  2-Level Hierarchy Confirmed
+                                </div>
+                                <div style={{ fontSize: '11px', color: '#555', marginTop: '3px' }}>
+                                  Issue → Parent → Grandparent
+                                </div>
+                              </div>
+                              
                               <div style={{ 
                                 fontSize: '13px', 
                                 marginBottom: '8px',
@@ -1361,6 +1931,18 @@ const Dashboard = () => {
                                 </div>
                                 
                                 <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                  <span style={{ color: '#666', fontSize: '12px' }}>Actual Value</span>
+                                  <span style={{ 
+                                    fontWeight: 'bold', 
+                                    color: '#4CAF50',
+                                    fontSize: '16px'
+                                  }}>
+                                    {data.actualValue.toFixed(2)}
+                                  </span>
+                                
+                                </div>
+                                
+                                <div style={{ display: 'flex', flexDirection: 'column' }}>
                                   <span style={{ color: '#666', fontSize: '12px' }}>Status</span>
                                   <span style={{ 
                                     fontWeight: 'bold',
@@ -1377,55 +1959,30 @@ const Dashboard = () => {
                                     {data.status}
                                   </span>
                                 </div>
-                                
-                                <div style={{ display: 'flex', flexDirection: 'column' }}>
-                                  <span style={{ color: '#666', fontSize: '12px' }}>Assigned To</span>
-                                  <span style={{ fontSize: '12px' }}>{data.assignedTo}</span>
-                                </div>
-                                
-                                <div style={{ display: 'flex', flexDirection: 'column' }}>
-                                  <span style={{ color: '#666', fontSize: '12px' }}>Done Ratio</span>
-                                  <span style={{ fontSize: '12px' }}>{data.doneRatio}%</span>
-                                </div>
-                                
-                                <div style={{ display: 'flex', flexDirection: 'column' }}>
-                                  <span style={{ color: '#666', fontSize: '12px' }}>Tracker</span>
-                                  <span style={{ fontSize: '12px' }}>{data.tracker}</span>
-                                </div>
                               </div>
                               
-                              {/* Quarter Distribution Info */}
-                              {quarterInfo && quarterInfo.hasValidValue && (
-                                <div style={{
-                                  marginTop: '15px',
-                                  padding: '10px',
-                                  backgroundColor: '#f0f7ff',
-                                  borderRadius: '6px',
-                                  fontSize: '12px',
-                                  borderLeft: '3px solid #1976d2'
-                                }}>
-                                  <div style={{ fontWeight: 'bold', color: '#1976d2', marginBottom: '5px' }}>
-                                    <span style={{ fontSize: '14px', marginRight: '5px' }}>📅</span>
-                                    Smart Quarter Mapping
-                                  </div>
-                                  <div style={{ fontSize: '11px', color: '#555' }}>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '3px' }}>
-                                      <span>Valid Quarters:</span>
-                                      <span style={{ fontWeight: 'bold' }}>{quarterInfo.validQuartersCount}/4</span>
-                                    </div>
-                                    <div style={{ marginBottom: '3px' }}>
-                                      <span style={{ color: '#777' }}>List: </span>
-                                      <span>{quarterInfo.validQuartersList.join(', ')}</span>
-                                    </div>
-                                    <div>
-                                      <span style={{ color: '#777' }}>Range: </span>
-                                      <span style={{ fontWeight: 'bold' }}>
-                                        {quarterInfo.range.start.toFixed(1)}% - {quarterInfo.range.end.toFixed(1)}%
-                                      </span>
-                                    </div>
-                                  </div>
+                              <div style={{
+                                marginTop: '15px',
+                                padding: '10px',
+                                backgroundColor: '#f0f7ff',
+                                borderRadius: '6px',
+                                fontSize: '12px',
+                                borderLeft: '3px solid #1976d2'
+                              }}>
+                                <div style={{ fontWeight: 'bold', color: '#1976d2', marginBottom: '5px' }}>
+                                  <span style={{ fontSize: '14px', marginRight: '5px' }}>📊</span>
+                                  Calculation Formula
                                 </div>
-                              )}
+                                <div style={{ fontSize: '11px', color: '#555' }}>
+                                  {selectedPeriod === 'Yearly' ? (
+                                    <span>((Q1_actual + Q2_actual + Q3_actual + Q4_actual) × 100) ÷ yearly_target</span>
+                                  ) : selectedPeriod.includes('ሩብዓመት') ? (
+                                    <span>(quarter_actual × 100) ÷ quarter_target</span>
+                                  ) : (
+                                    <span>Average of quarter progress percentages</span>
+                                  )}
+                                </div>
+                              </div>
                             </div>
                           );
                         }
@@ -1433,7 +1990,6 @@ const Dashboard = () => {
                       }}
                     />
                     
-                    {/* Bar with gradient effect and better styling */}
                     <Bar 
                       dataKey="progress" 
                       barSize={25}
@@ -1454,7 +2010,6 @@ const Dashboard = () => {
                         />
                       ))}
                       
-                      {/* Custom LabelList for inside-bar labels */}
                       <LabelList 
                         dataKey="progress" 
                         position="right" 
@@ -1468,7 +2023,6 @@ const Dashboard = () => {
                         }} 
                       />
                       
-                      {/* Optional: Add second label for issue IDs */}
                       <LabelList 
                         dataKey="id" 
                         position="insideLeft" 
@@ -1484,122 +2038,16 @@ const Dashboard = () => {
                     </Bar>
                   </BarChart>
                 </ResponsiveContainer>
-                
-                {/* Legend/Instructions */}
-                <div style={{
-                  position: 'absolute',
-                  top: '20px',
-                  right: '20px',
-                  backgroundColor: 'rgba(255,255,255,0.9)',
-                  padding: '10px 15px',
-                  borderRadius: '6px',
-                  border: '1px solid #e0e0e0',
-                  fontSize: '11px',
-                  color: '#666',
-                  zIndex: 10,
-                  maxWidth: '150px'
-                }}>
-                  <div style={{ fontWeight: 'bold', marginBottom: '5px', color: '#333' }}>
-                    Color Guide:
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', marginBottom: '3px' }}>
-                    <div style={{ 
-                      width: '12px', 
-                      height: '12px', 
-                      backgroundColor: '#2e7d32', 
-                      marginRight: '5px',
-                      borderRadius: '2px'
-                    }}></div>
-                    <span>100%</span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', marginBottom: '3px' }}>
-                    <div style={{ 
-                      width: '12px', 
-                      height: '12px', 
-                      backgroundColor: '#4caf50', 
-                      marginRight: '5px',
-                      borderRadius: '2px'
-                    }}></div>
-                    <span>75-99%</span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', marginBottom: '3px' }}>
-                    <div style={{ 
-                      width: '12px', 
-                      height: '12px', 
-                      backgroundColor: '#ff9800', 
-                      marginRight: '5px',
-                      borderRadius: '2px'
-                    }}></div>
-                    <span>50-74%</span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', marginBottom: '3px' }}>
-                    <div style={{ 
-                      width: '12px', 
-                      height: '12px', 
-                      backgroundColor: '#ff5722', 
-                      marginRight: '5px',
-                      borderRadius: '2px'
-                    }}></div>
-                    <span>1-49%</span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center' }}>
-                    <div style={{ 
-                      width: '12px', 
-                      height: '12px', 
-                      backgroundColor: '#f44336', 
-                      marginRight: '5px',
-                      borderRadius: '2px'
-                    }}></div>
-                    <span>0%</span>
-                  </div>
-                </div>
-              </div>
-              
-              {/* Chart Summary */}
-              <div style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                marginTop: '15px',
-                padding: '10px 15px',
-                backgroundColor: '#f8f9fa',
-                borderRadius: '6px',
-                fontSize: '12px',
-                color: '#666'
-              }}>
-                <div>
-                  <strong>Chart Summary:</strong> Hover over bars for detailed information
-                </div>
-                <div style={{ display: 'flex', gap: '20px' }}>
-                  <div>
-                    <span style={{ color: '#666' }}>Highest Progress: </span>
-                    <span style={{ fontWeight: 'bold', color: getProgressColor(chartData[0]?.progress || 0) }}>
-                      {chartData[0]?.progress || 0}%
-                    </span>
-                  </div>
-                  <div>
-                    <span style={{ color: '#666' }}>Average: </span>
-                    <span style={{ fontWeight: 'bold', color: getProgressColor(overallProgress) }}>
-                      {overallProgress}%
-                    </span>
-                  </div>
-                  <div>
-                    <span style={{ color: '#666' }}>Lowest Progress: </span>
-                    <span style={{ fontWeight: 'bold', color: getProgressColor(chartData[chartData.length-1]?.progress || 0) }}>
-                      {chartData[chartData.length-1]?.progress || 0}%
-                    </span>
-                  </div>
-                </div>
               </div>
             </div>
           )}
 
-          {/* Issues List - UPDATED TABLE (shows ALL data, not just first 10) */}
+          {/* Issues List */}
           {tableData.length > 0 ? (
             <div style={{ marginBottom: '40px' }}>
               <h3 style={{ marginBottom: '20px', color: '#333', display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <span style={{ fontSize: '20px' }}>📋</span>
-                Issues Details ({selectedPeriod})
+                የግል እቅድ Details ({selectedPeriod})
               </h3>
               
               <div style={{
@@ -1607,7 +2055,7 @@ const Dashboard = () => {
                 backgroundColor: 'white',
                 borderRadius: '8px',
                 border: '1px solid #e0e0e0',
-                maxHeight: '600px', // Added max height with vertical scroll
+                maxHeight: '600px',
                 overflowY: 'auto'
               }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -1615,18 +2063,17 @@ const Dashboard = () => {
                     <tr style={{ backgroundColor: '#f8f9fa', position: 'sticky', top: 0, zIndex: 1 }}>
                       <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #dee2e6', fontWeight: 'bold' }}>Subject</th>
                       <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #dee2e6', fontWeight: 'bold' }}>Status</th>
-                      <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #dee2e6', fontWeight: 'bold' }}>Assigned To</th>
                       <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #dee2e6', fontWeight: 'bold' }}>{selectedPeriod} Target</th>
+                      <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #dee2e6', fontWeight: 'bold' }}>Actual Value</th>
                       <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #dee2e6', fontWeight: 'bold' }}>Progress</th>
                       <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #dee2e6', fontWeight: 'bold' }}>Weight</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {tableData.map((issue, index) => ( // CHANGED: Removed .slice(0, 10) to show ALL data
+                    {tableData.map((issue, index) => (
                       <tr key={issue.id} style={{ 
                         borderBottom: '1px solid #dee2e6',
-                        backgroundColor: index % 2 === 0 ? '#fff' : '#f8f9fa',
-                        transition: 'background-color 0.2s ease'
+                        backgroundColor: index % 2 === 0 ? '#fff' : '#f8f9fa'
                       }}>
                         <td style={{ padding: '12px', maxWidth: '350px', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                           {truncateText(issue.subject, 70)}
@@ -1645,9 +2092,12 @@ const Dashboard = () => {
                             {issue.status}
                           </span>
                         </td>
-                        <td style={{ padding: '12px' }}>{truncateText(issue.assignedTo, 20)}</td>
                         <td style={{ padding: '12px', fontWeight: 'bold', color: '#1976d2' }}>
                           {issue.targetValue}
+                        </td>
+                        <td style={{ padding: '12px', fontWeight: 'bold', color: '#4CAF50' }}>
+                          {issue.actualValue}
+                          
                         </td>
                         <td style={{ padding: '12px' }}>
                           <div style={{ 
@@ -1671,7 +2121,7 @@ const Dashboard = () => {
                   </tbody>
                   <tfoot>
                     <tr style={{ backgroundColor: '#e3f2fd', position: 'sticky', bottom: 0, zIndex: 1 }}>
-                      <td style={{ padding: '12px', fontWeight: 'bold' }} colSpan="3">Average / Total</td>
+                      <td style={{ padding: '12px', fontWeight: 'bold' }} colSpan="2">Average / Total</td>
                       <td style={{ padding: '12px', fontWeight: 'bold', color: '#1976d2' }}>
                         {tableData.length > 0 
                           ? (tableData
@@ -1679,8 +2129,15 @@ const Dashboard = () => {
                             tableData.length).toFixed(2)
                           : '0'}
                       </td>
-                      <td style={{ padding: '12px', fontWeight: 'bold', color: getProgressColor(overallProgress) }}>
-                        {overallProgress}%
+                      <td style={{ padding: '12px', fontWeight: 'bold', color: '#4CAF50' }}>
+                        {tableData.length > 0 
+                          ? (tableData
+                              .reduce((sum, row) => sum + parseFloat(row.actualValue || 0), 0) / 
+                            tableData.length).toFixed(2)
+                          : '0'}
+                      </td>
+                      <td style={{ padding: '12px', fontWeight: 'bold', color: getProgressColor(twoLevelHierarchyPerformance) }}>
+                        {twoLevelHierarchyPerformance}%
                       </td>
                       <td style={{ padding: '12px', fontWeight: 'bold' }}>
                         {tableData.reduce((sum, row) => sum + row.weight, 0)}
@@ -1688,19 +2145,6 @@ const Dashboard = () => {
                     </tr>
                   </tfoot>
                 </table>
-              </div>
-              
-              {/* Table Summary - Shows total count */}
-              <div style={{
-                marginTop: '15px',
-                padding: '10px 15px',
-                backgroundColor: '#f8f9fa',
-                borderRadius: '6px',
-                fontSize: '12px',
-                color: '#666',
-                textAlign: 'center'
-              }}>
-                Showing all {tableData.length} issues with valid {selectedPeriod} targets
               </div>
             </div>
           ) : (
@@ -1714,45 +2158,22 @@ const Dashboard = () => {
               marginBottom: '30px'
             }}>
               <div style={{ fontSize: '48px', marginBottom: '20px' }}>📋</div>
-              <h3>No Issues with Valid {selectedPeriod} Targets</h3>
-              <p>None of your issues have a valid target value for the selected period ({selectedPeriod}).</p>
-              <div style={{ marginTop: '15px', fontSize: '14px', color: '#888' }}>
-                Try selecting a different period or check if your issues have the correct target values set.
-              </div>
+              <h3>No የግል እቅድ Found</h3>
+              <p>None of your assigned issues have exactly 2 levels of parent hierarchy with valid target values.</p>
             </div>
           )}
         </div>
       )}
 
-      {/* Footer Stats */}
-      <div style={{
-        marginTop: '40px',
-        paddingTop: '20px',
-        borderTop: '1px solid #eee',
-        fontSize: '12px',
-        color: '#666',
-        textAlign: 'center'
-      }}>
-        <div style={{ display: 'flex', justifyContent: 'center', gap: '20px', flexWrap: 'wrap' }}>
-          <span>Total Issues Created: {issues.length}</span>
-          <span>•</span>
-          <span>Filtered Issues ({selectedPeriod}): {filteredIssues.length}</span>
-          <span>•</span>
-          <span>Overall Progress: {overallProgress}%</span>
-          <span>•</span>
-          <span>Active Tab: {activeTab === 'performance' ? 'Performance' : 'Analysis'}</span>
-          <span>•</span>
-          <span>Last Updated: {new Date().toLocaleTimeString()}</span>
-        </div>
-        <div style={{ marginTop: '10px', fontSize: '11px', color: '#888' }}>
-          *Showing only issues with valid {selectedPeriod} target values
-          {selectedPeriod === "Yearly" && " (የዓመቱ እቅድ)"}
-          {selectedPeriod === "6 Months" && " (1ኛ ሩብዓመት + 2ኛ ሩብዓመት)"}
-          {selectedPeriod === "9 Months" && " (1ኛ ሩብዓመት + 2ኛ ሩብዓመት + 3ኛ ሩብዓመት)"}
-          {selectedPeriod.includes("ሩብዓመት") && " • Smart quarter mapping active"}
-          {user && ` • User: ${user.firstname} ${user.lastname} (${user.login})`}
-        </div>
-      </div>
+      
+      
+
+      <style>{`
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+      `}</style>
     </div>
   );
 };
