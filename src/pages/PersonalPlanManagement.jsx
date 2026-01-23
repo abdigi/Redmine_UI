@@ -13,9 +13,6 @@ import {
 
 export default function AddSubIssue() {
   const [currentUser, setCurrentUser] = useState(null);
-  const [issues, setIssues] = useState([]);
-  const [parentIssues, setParentIssues] = useState([]);
-  const [childIssuesWithSubIssues, setChildIssuesWithSubIssues] = useState(new Map());
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
@@ -29,6 +26,11 @@ export default function AddSubIssue() {
     start_date: "",
     due_date: ""
   });
+  
+  // Data structures for the hierarchy
+  const [parentIssues, setParentIssues] = useState([]); // ዋና ተግባር
+  const [childIssuesMap, setChildIssuesMap] = useState(new Map()); // Child issues grouped by parent ID
+  const [subIssuesMap, setSubIssuesMap] = useState(new Map()); // Sub-issues grouped by child ID
   
   const [parentId, setParentId] = useState("");
   const [parentIssue, setParentIssue] = useState(null);
@@ -54,9 +56,7 @@ export default function AddSubIssue() {
     "1ኛ ሩብዓመት_አፈጻጸም",
     "2ኛ ሩብዓመት_አፈጻጸም",
     "3ኛ ሩብዓመት_አፈጻጸም",
-    "4ኛ ሩብዓመት_አፈጻጸም"
-
-    
+    "4ኛ ሩብዓመት_አፈጻጸም"  
   ];
 
   // Load current user FIRST
@@ -66,7 +66,6 @@ export default function AddSubIssue() {
         const user = await getCurrentUser();
         setCurrentUser(user);
         if (user) {
-          // Auto-assign to current user
           setAssignedToId(user.id || "");
         }
       } catch (error) {
@@ -76,67 +75,97 @@ export default function AddSubIssue() {
     loadCurrentUser();
   }, []);
 
-  // Then load issues AFTER currentUser is available
+  // Then load issues in the new hierarchy
   useEffect(() => {
-    async function loadUserAndIssues() {
+    async function loadIssuesHierarchy() {
       if (!currentUser) return;
       
       setLoading(true);
       try {
-        // Get all issues assigned to current user
-        const allIssues = await getIssuesAssignedToMe();
+        // Fetch ALL issues assigned to current user (single API call)
+        const allAssignedIssues = await getIssuesAssignedToMe();
         
-        // Separate parent and child issues
-        const parentMap = new Map();
-        const childIssueIds = new Set();
+        // Step 1: Create sets for tracking unique issues
+        const childIssues = new Map(); // childId -> childIssue
+        const parentIds = new Set(); // unique parent IDs
+        const subIssuesByChildId = new Map(); // childId -> [subIssues]
         
-        // First, collect all parent issues
-        allIssues.forEach(issue => {
-          if (!issue.parent) {
-            parentMap.set(issue.id, { ...issue, children: [] });
-          } else {
-            childIssueIds.add(issue.id);
+        // First pass: Identify child issues and collect parent IDs
+        allAssignedIssues.forEach(issue => {
+          if (issue.parent && issue.parent.id) {
+            // This is either a child issue or a sub-issue
+            parentIds.add(issue.parent.id);
           }
         });
         
-        // Then, add child issues to their parents
-        allIssues.forEach(issue => {
-          if (issue.parent && parentMap.has(issue.parent.id)) {
-            parentMap.get(issue.parent.id).children.push(issue);
-          }
-        });
-        
-        // Load sub-issues ASSIGNED TO current user for each child issue
-        const childWithSubIssuesMap = new Map();
-        
-        if (childIssueIds.size > 0) {
-          // CHANGED: Use getIssuesAssignedToMe instead of getIssuesCreatedByUser
-          const assignedIssues = await getIssuesAssignedToMe();
-          
-          // Filter sub-issues for each child issue
-          for (const childId of childIssueIds) {
-            const childSubIssues = assignedIssues.filter(issue => 
-              issue.parent && issue.parent.id === childId
+        // Second pass: Separate child issues from sub-issues
+        allAssignedIssues.forEach(issue => {
+          if (issue.parent && issue.parent.id) {
+            // Check if this issue's parent is in parentIds
+            // If parent is in parentIds, this could be a child or sub-issue
+            // We need to check if this issue itself has children
+            const isSubIssue = allAssignedIssues.some(otherIssue => 
+              otherIssue.parent && otherIssue.parent.id === issue.id
             );
             
-            if (childSubIssues.length > 0) {
-              childWithSubIssuesMap.set(childId, childSubIssues);
+            if (isSubIssue) {
+              // This is a child issue (ዝርዝር ተግባር)
+              childIssues.set(issue.id, issue);
+            } else {
+              // This is a sub-issue (የግል እቅድ)
+              if (!subIssuesByChildId.has(issue.parent.id)) {
+                subIssuesByChildId.set(issue.parent.id, []);
+              }
+              subIssuesByChildId.get(issue.parent.id).push(issue);
             }
+          }
+        });
+        
+        // Step 2: Fetch parent issues for the child issues
+        const parentIssuesList = [];
+        const childIssuesByParentId = new Map();
+        
+        // Organize child issues by their parent ID
+        Array.from(childIssues.values()).forEach(child => {
+          if (child.parent && child.parent.id) {
+            if (!childIssuesByParentId.has(child.parent.id)) {
+              childIssuesByParentId.set(child.parent.id, []);
+            }
+            childIssuesByParentId.get(child.parent.id).push(child);
+          }
+        });
+        
+        // Fetch parent issues and attach their children
+        for (const parentId of Array.from(childIssuesByParentId.keys())) {
+          try {
+            const parent = await getIssue(parentId);
+            const children = childIssuesByParentId.get(parentId) || [];
+            
+            parentIssuesList.push({
+              ...parent,
+              children: children
+            });
+          } catch (error) {
+            console.error(`Error loading parent issue ${parentId}:`, error);
           }
         }
         
-        setParentIssues(Array.from(parentMap.values()));
-        setChildIssuesWithSubIssues(childWithSubIssuesMap);
-        setIssues(allIssues);
+        // Sort parent issues by ID
+        parentIssuesList.sort((a, b) => (a.id || 0) - (b.id || 0));
+        
+        // Update state
+        setParentIssues(parentIssuesList);
+        setChildIssuesMap(childIssuesByParentId);
+        setSubIssuesMap(subIssuesByChildId);
         
       } catch (error) {
-        console.error("Error loading user issues:", error);
+        console.error("Error loading issue hierarchy:", error);
       } finally {
         setLoading(false);
       }
     }
     
-    loadUserAndIssues();
+    loadIssuesHierarchy();
   }, [currentUser]);
 
   // Load parent issue data when parent is selected
@@ -145,14 +174,12 @@ export default function AddSubIssue() {
       const issue = await getIssue(issueId);
       setParentIssue(issue);
       
-      // Set tracker ID from parent issue
       if (issue.tracker && issue.tracker.id) {
         setTrackerId(issue.tracker.id.toString());
       }
       
       setStatuses(issue.allowed_statuses || []);
 
-      // Filter out excluded fields from custom fields
       const filteredCustomFields = (issue.custom_fields || [])
         .filter(cf => !excludedFields.includes(cf.name))
         .map(cf => ({
@@ -176,7 +203,6 @@ export default function AddSubIssue() {
   const handleEditClick = async (issue) => {
     setEditingIssue(issue);
     
-    // Set edit form data
     setEditFormData({
       subject: issue.subject || "",
       description: issue.description || "",
@@ -187,19 +213,16 @@ export default function AddSubIssue() {
       due_date: issue.due_date || ""
     });
     
-    // Load tracker if available
     if (issue.tracker && issue.tracker.id) {
       setTrackerId(issue.tracker.id.toString());
     }
     
-    // First, load the parent issue data to get all available fields
     if (issue.parent && issue.parent.id) {
       try {
         const parentIssueData = await getIssue(issue.parent.id);
         setParentIssue(parentIssueData);
         setStatuses(parentIssueData.allowed_statuses || []);
         
-        // Filter out excluded fields from custom fields
         const parentCustomFields = (parentIssueData.custom_fields || [])
           .filter(cf => !excludedFields.includes(cf.name));
         
@@ -230,10 +253,10 @@ export default function AddSubIssue() {
       parent_issue_id: parentId,
       subject,
       description,
-      tracker_id: trackerId, // Inherited from parent
+      tracker_id: trackerId,
       status_id: statusId,
       priority_id: priorityId,
-      assigned_to_id: currentUser?.id, // Auto-assign to current user
+      assigned_to_id: currentUser?.id,
       start_date: startDate || null,
       due_date: dueDate || null,
       custom_fields: customFields.map(f => ({ id: f.id, value: f.value })),
@@ -256,7 +279,7 @@ export default function AddSubIssue() {
 
     const payload = {
       ...editFormData,
-      assigned_to_id: currentUser?.id, // Auto-assign to current user
+      assigned_to_id: currentUser?.id,
       custom_fields: editCustomFields.map(f => ({ id: f.id, value: f.value }))
     };
 
@@ -300,45 +323,74 @@ export default function AddSubIssue() {
     
     setLoading(true);
     try {
-      const allIssues = await getIssuesAssignedToMe();
-      const parentMap = new Map();
-      const childIssueIds = new Set();
+      // Re-fetch all data using the same logic
+      const allAssignedIssues = await getIssuesAssignedToMe();
       
-      allIssues.forEach(issue => {
-        if (!issue.parent) {
-          parentMap.set(issue.id, { ...issue, children: [] });
-        } else {
-          childIssueIds.add(issue.id);
+      const childIssues = new Map();
+      const parentIds = new Set();
+      const subIssuesByChildId = new Map();
+      
+      // First pass: Identify child issues and collect parent IDs
+      allAssignedIssues.forEach(issue => {
+        if (issue.parent && issue.parent.id) {
+          parentIds.add(issue.parent.id);
         }
       });
       
-      allIssues.forEach(issue => {
-        if (issue.parent && parentMap.has(issue.parent.id)) {
-          parentMap.get(issue.parent.id).children.push(issue);
-        }
-      });
-      
-      // Load sub-issues ASSIGNED TO current user for each child issue
-      const childWithSubIssuesMap = new Map();
-      
-      if (childIssueIds.size > 0) {
-        // CHANGED: Use getIssuesAssignedToMe instead of getIssuesCreatedByUser
-        const assignedIssues = await getIssuesAssignedToMe();
-        
-        for (const childId of childIssueIds) {
-          const childSubIssues = assignedIssues.filter(issue => 
-            issue.parent && issue.parent.id === childId
+      // Second pass: Separate child issues from sub-issues
+      allAssignedIssues.forEach(issue => {
+        if (issue.parent && issue.parent.id) {
+          const isSubIssue = allAssignedIssues.some(otherIssue => 
+            otherIssue.parent && otherIssue.parent.id === issue.id
           );
           
-          if (childSubIssues.length > 0) {
-            childWithSubIssuesMap.set(childId, childSubIssues);
+          if (isSubIssue) {
+            // This is a child issue
+            childIssues.set(issue.id, issue);
+          } else {
+            // This is a sub-issue
+            if (!subIssuesByChildId.has(issue.parent.id)) {
+              subIssuesByChildId.set(issue.parent.id, []);
+            }
+            subIssuesByChildId.get(issue.parent.id).push(issue);
           }
+        }
+      });
+      
+      // Organize child issues by their parent ID
+      const parentIssuesList = [];
+      const childIssuesByParentId = new Map();
+      
+      Array.from(childIssues.values()).forEach(child => {
+        if (child.parent && child.parent.id) {
+          if (!childIssuesByParentId.has(child.parent.id)) {
+            childIssuesByParentId.set(child.parent.id, []);
+          }
+          childIssuesByParentId.get(child.parent.id).push(child);
+        }
+      });
+      
+      // Fetch parent issues and attach their children
+      for (const parentId of Array.from(childIssuesByParentId.keys())) {
+        try {
+          const parent = await getIssue(parentId);
+          const children = childIssuesByParentId.get(parentId) || [];
+          
+          parentIssuesList.push({
+            ...parent,
+            children: children
+          });
+        } catch (error) {
+          console.error(`Error loading parent issue ${parentId}:`, error);
         }
       }
       
-      setParentIssues(Array.from(parentMap.values()));
-      setChildIssuesWithSubIssues(childWithSubIssuesMap);
-      setIssues(allIssues);
+      parentIssuesList.sort((a, b) => (a.id || 0) - (b.id || 0));
+      
+      setParentIssues(parentIssuesList);
+      setChildIssuesMap(childIssuesByParentId);
+      setSubIssuesMap(subIssuesByChildId);
+      
     } catch (error) {
       console.error("Error refreshing data:", error);
     } finally {
@@ -483,7 +535,7 @@ export default function AddSubIssue() {
               color: "#2e7d32", 
               marginBottom: "10px" 
             }}>
-              No Issues Assigned
+              No ዝርዝር ተግባር Assigned
             </h3>
             <p style={{ 
               color: "#666", 
@@ -491,7 +543,7 @@ export default function AddSubIssue() {
               maxWidth: "400px",
               margin: "0 auto"
             }}>
-              You don't have any issues assigned to you at the moment.
+              You don't have any ዝርዝር ተግባር (detailed tasks) assigned to you at the moment.
             </p>
           </div>
         ) : (
@@ -513,17 +565,16 @@ export default function AddSubIssue() {
               <tbody>
                 {parentIssues.map(parent => (
                   <React.Fragment key={parent.id}>
-                    {/* Parent Issue Row */}
+                    {/* Parent Issue Row (ዋና ተግባር) */}
                     <tr style={{ 
                       background: "#e8f5e9",
                       borderBottom: "2px solid #c8e6c9"
                     }}>
                       <td style={{ padding: "12px" }}>
-                       
                         ዋና ተግባር
                       </td>
                       <td style={{ padding: "12px", fontWeight: "bold" }}>
-                        {parent.subject}
+                        #{parent.id} - {parent.subject}
                       </td>
                       <td style={{ padding: "12px" }}>{formatDate(parent.start_date)}</td>
                       <td style={{ padding: "12px" }}>{formatDate(parent.due_date)}</td>
@@ -532,19 +583,18 @@ export default function AddSubIssue() {
                       </td>
                     </tr>
                     
-                    {/* Child Issues */}
-                    {parent.children.map(child => (
+                    {/* Child Issues (ዝርዝር ተግባር) */}
+                    {parent.children && parent.children.map(child => (
                       <React.Fragment key={child.id}>
                         <tr style={{ 
                           background: "#f9f9f9",
                           borderLeft: "4px solid #81c784"
                         }}>
                           <td style={{ padding: "12px", paddingLeft: "30px" }}>
-                          
                             ዝርዝር ተግባር
                           </td>
                           <td style={{ padding: "12px", paddingLeft: "30px" }}>
-                             {child.subject}
+                            #{child.id} - {child.subject}
                           </td>
                           <td style={{ padding: "12px" }}>{formatDate(child.start_date)}</td>
                           <td style={{ padding: "12px" }}>{formatDate(child.due_date)}</td>
@@ -575,19 +625,18 @@ export default function AddSubIssue() {
                           </td>
                         </tr>
                         
-                        {/* Sub-Issues ASSIGNED TO current user */}
-                        {childIssuesWithSubIssues.has(child.id) && (
-                          childIssuesWithSubIssues.get(child.id).map(subIssue => (
+                        {/* Sub-Issues (የግል እቅድ) */}
+                        {subIssuesMap.has(child.id) && (
+                          subIssuesMap.get(child.id).map(subIssue => (
                             <tr key={subIssue.id} style={{ 
                               background: "#f1f8e9",
                               borderLeft: "8px solid #a5d6a7"
                             }}>
                               <td style={{ padding: "12px", paddingLeft: "50px" }}>
-                             
                                 የግል እቅድ
                               </td>
                               <td style={{ padding: "12px", paddingLeft: "50px" }}>
-                                {subIssue.subject}
+                                #{subIssue.id} - {subIssue.subject}
                               </td>
                               <td style={{ padding: "12px" }}>{formatDate(subIssue.start_date)}</td>
                               <td style={{ padding: "12px" }}>{formatDate(subIssue.due_date)}</td>
