@@ -68,6 +68,8 @@ export default function ProgressPage() {
                 // Get full issue with all details
                 const fullIssue = await getIssue(issue.id);
                 if (fullIssue) {
+                  // Store parent reference for later use
+                  fullIssue._parent = directParent;
                   filteredIssues.push(fullIssue);
                 }
               }
@@ -232,6 +234,51 @@ export default function ProgressPage() {
     return isNaN(quarterTarget) ? 0 : quarterTarget;
   };
 
+  // Helper function to get custom field ID
+  const getCustomFieldId = (issue, fieldName) => {
+    if (!issue.custom_fields) return null;
+    const field = issue.custom_fields.find((f) => f.name === fieldName);
+    return field ? field.id : null;
+  };
+
+  // Helper function to update custom field value
+  const updateCustomFieldValue = (issue, fieldName, newValue) => {
+    const updatedIssue = { ...issue };
+    if (!updatedIssue.custom_fields) {
+      updatedIssue.custom_fields = [];
+    }
+    
+    const fieldId = getCustomFieldId(updatedIssue, fieldName);
+    const fieldIndex = updatedIssue.custom_fields.findIndex(f => 
+      f.name === fieldName
+    );
+    
+    if (fieldIndex >= 0) {
+      updatedIssue.custom_fields[fieldIndex].value = newValue.toString();
+    } else {
+      updatedIssue.custom_fields.push({
+        id: fieldId,
+        name: fieldName,
+        value: newValue.toString()
+      });
+    }
+    
+    return updatedIssue;
+  };
+
+  // Calculate new parent performance: parent_current - child_old + child_new
+  const calculateParentPerformance = (parentIssue, performanceFieldName, childOldValue, childNewValue) => {
+    const currentParentValue = getCustomFieldAsNumber(parentIssue, performanceFieldName);
+    const childOldNum = parseFloat(childOldValue) || 0;
+    const childNewNum = parseFloat(childNewValue) || 0;
+    
+    // Formula: parent_current - child_old + child_new
+    const newParentValue = currentParentValue - childOldNum + childNewNum;
+    
+    // Ensure value is not negative (minimum 0)
+    return Math.max(0, newParentValue);
+  };
+
   const handleSavePerformance = async () => {
     if (!selectedIssue || !selectedQuarter || quarterValue === "") return;
     
@@ -247,10 +294,13 @@ export default function ProgressPage() {
     }
     
     try {
-      // First, try to get the custom field ID
-      const fieldId = getCustomFieldId(selectedIssue, performanceFieldName);
+      // Get the old performance value before saving
+      const oldPerformanceValue = getCustomField(selectedIssue, performanceFieldName);
+      const oldPerformanceNum = parseFloat(oldPerformanceValue) || 0;
+      const newPerformanceNum = parseFloat(performanceValue) || 0;
       
-      // Prepare update data
+      // Update the child issue first
+      const fieldId = getCustomFieldId(selectedIssue, performanceFieldName);
       const updateData = {
         custom_fields: [{
           id: fieldId,
@@ -261,48 +311,86 @@ export default function ProgressPage() {
       
       await updateIssue(selectedIssue.id, updateData);
       
-      // Update local state
+      // Now update the parent issue if it exists
+      let parentUpdateSuccess = false;
+      if (selectedIssue._parent) {
+        try {
+          // Get fresh parent data to ensure we have latest values
+          const freshParent = await getIssue(selectedIssue._parent.id);
+          
+          if (freshParent) {
+            // Calculate new parent performance value
+            const newParentPerformance = calculateParentPerformance(
+              freshParent,
+              performanceFieldName,
+              oldPerformanceValue,
+              performanceValue.toString()
+            );
+            
+            // Update parent issue
+            const parentFieldId = getCustomFieldId(freshParent, performanceFieldName);
+            const parentUpdateData = {
+              custom_fields: [{
+                id: parentFieldId,
+                name: performanceFieldName,
+                value: newParentPerformance.toString()
+              }]
+            };
+            
+            await updateIssue(freshParent.id, parentUpdateData);
+            parentUpdateSuccess = true;
+            
+            console.log(`Parent issue ${freshParent.id} updated: ${performanceFieldName} = ${newParentPerformance}`);
+          }
+        } catch (parentErr) {
+          console.error("Error updating parent issue:", parentErr);
+          // Continue even if parent update fails
+        }
+      }
+      
+      // Update local state for child issue
       setIssues(prev => prev.map(issue => {
         if (issue.id === selectedIssue.id) {
-          const updatedIssue = { ...issue };
-          if (!updatedIssue.custom_fields) {
-            updatedIssue.custom_fields = [];
-          }
-          
-          const fieldIndex = updatedIssue.custom_fields.findIndex(f => 
-            f.name === performanceFieldName
-          );
-          
-          if (fieldIndex >= 0) {
-            updatedIssue.custom_fields[fieldIndex].value = performanceValue.toString();
-          } else {
-            updatedIssue.custom_fields.push({
-              id: fieldId,
-              name: performanceFieldName,
-              value: performanceValue.toString()
-            });
-          }
-          
-          return updatedIssue;
+          return updateCustomFieldValue(issue, performanceFieldName, performanceValue.toString());
         }
         return issue;
       }));
+      
+      // If parent was updated, refresh parent data in the issues array
+      if (parentUpdateSuccess && selectedIssue._parent) {
+        setIssues(prev => prev.map(issue => {
+          // Check if this issue has the same parent ID
+          if (issue._parent && issue._parent.id === selectedIssue._parent.id) {
+            // Update the stored parent data
+            const updatedIssue = { ...issue };
+            updatedIssue._parent = updateCustomFieldValue(
+              updatedIssue._parent,
+              performanceFieldName,
+              calculateParentPerformance(
+                updatedIssue._parent,
+                performanceFieldName,
+                oldPerformanceValue,
+                performanceValue.toString()
+              ).toString()
+            );
+            return updatedIssue;
+          }
+          return issue;
+        }));
+      }
       
       setShowPopup(false);
       setSelectedIssue(null);
       setSelectedQuarter("");
       setQuarterValue("");
+      
+      // Show success message
+      alert(`Performance saved successfully!${parentUpdateSuccess ? ' Parent issue also updated.' : ''}`);
+      
     } catch (err) {
       console.error("Error saving performance:", err);
       alert("Failed to save performance. Please try again.");
     }
-  };
-
-  // Helper function to get custom field ID
-  const getCustomFieldId = (issue, fieldName) => {
-    if (!issue.custom_fields) return null;
-    const field = issue.custom_fields.find((f) => f.name === fieldName);
-    return field ? field.id : null;
   };
 
   // Check if performance button should be shown for ANY quarter (not just active)
@@ -482,6 +570,19 @@ export default function ProgressPage() {
         }}>
           ℹ️ All quarters with target values are now open for performance entry
         </div>
+        
+        {/* Note about parent-child relationship */}
+        <div style={{ 
+          marginTop: "15px", 
+          padding: "10px", 
+          backgroundColor: "#4CAF50",
+          color: "white",
+          borderRadius: "5px",
+          fontSize: "12px",
+          fontWeight: "bold"
+        }}>
+          📊 When you update a child issue's performance, its parent issue's performance will be automatically recalculated
+        </div>
       </div>
 
       {issues.length === 0 ? (
@@ -534,6 +635,11 @@ export default function ProgressPage() {
                 >
                   <td style={tdStyle}>
                     <div>{issue.subject}</div>
+                    {issue._parent && (
+                      <div style={{ fontSize: "11px", color: "#666", marginTop: "3px" }}>
+                        Parent: {issue._parent.subject}
+                      </div>
+                    )}
                   </td>
 
                   {customFieldNames.map((name) => {
@@ -677,6 +783,21 @@ export default function ProgressPage() {
               <strong>Issue:</strong> {selectedIssue.subject}
             </div>
             
+            {selectedIssue._parent && (
+              <div style={{ 
+                marginBottom: "15px", 
+                padding: "10px", 
+                backgroundColor: "#f0f8ff",
+                borderRadius: "5px",
+                borderLeft: "4px solid #4CAF50"
+              }}>
+                <strong>Parent Issue:</strong> {selectedIssue._parent.subject}
+                <div style={{ fontSize: "12px", color: "#666", marginTop: "5px" }}>
+                  Parent's performance will be updated automatically
+                </div>
+              </div>
+            )}
+            
             <div style={{ marginBottom: "15px" }}>
               <strong>Quarter:</strong> {selectedQuarter}
               {selectedQuarter === currentQuarter && (
@@ -736,12 +857,39 @@ export default function ProgressPage() {
                   return (
                     <div style={{ marginTop: "5px" }}>
                       <strong>Current Performance:</strong> {currentPerformance}
+                      <div style={{ fontSize: "12px", color: "#666", marginTop: "3px" }}>
+                        Old value that will be subtracted from parent
+                      </div>
                     </div>
                   );
                 }
                 return null;
               })()}
             </div>
+            
+            {selectedIssue._parent && (() => {
+              const performanceFieldName = getPerformanceFieldName(selectedQuarter);
+              const parentCurrentPerformance = performanceFieldName ? 
+                getCustomField(selectedIssue._parent, performanceFieldName) : "";
+              
+              if (parentCurrentPerformance) {
+                return (
+                  <div style={{ 
+                    marginBottom: "15px", 
+                    padding: "10px", 
+                    backgroundColor: "#e8f5e9",
+                    borderRadius: "5px",
+                    borderLeft: "4px solid #4CAF50"
+                  }}>
+                    <div><strong>Parent Current Performance:</strong> {parentCurrentPerformance}</div>
+                    <div style={{ fontSize: "12px", color: "#666", marginTop: "3px" }}>
+                      Will be updated: parent_current - child_old + child_new
+                    </div>
+                  </div>
+                );
+              }
+              return null;
+            })()}
             
             <div style={{ marginBottom: "15px" }}>
               <label style={{ display: "block", marginBottom: "5px", fontWeight: "bold" }}>
@@ -771,7 +919,6 @@ export default function ProgressPage() {
                 }}
                 placeholder="Enter achievement value for this quarter (0 is allowed)"
               />
-             
             </div>
             
             <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "20px" }}>
@@ -813,6 +960,7 @@ export default function ProgressPage() {
                 {quarterValue === "0" ? 
                   "Set Performance to 0" : 
                   `Save Performance as ${quarterValue}`}
+                {selectedIssue._parent && " (Update Parent)"}
               </button>
             </div>
           </div>
@@ -829,6 +977,12 @@ export default function ProgressPage() {
           
           <div style={{ marginTop: "5px", fontWeight: "bold", color: "#2196F3" }}>
             ✓ All quarters with target values are enabled for performance entry
+          </div>
+          <div style={{ marginTop: "5px", fontWeight: "bold", color: "#4CAF50" }}>
+            ✓ Parent issues are automatically updated when child performance changes
+          </div>
+          <div style={{ marginTop: "5px", fontSize: "11px", color: "#888" }}>
+            Formula: Parent_new = Parent_current - Child_old + Child_new
           </div>
           <div style={{ marginTop: "5px", fontSize: "11px", color: "#888" }}>
             Fiscal Year {fiscalYearStart}-{fiscalYearEnd} (Q1 starts May 9, {fiscalYearStart})
