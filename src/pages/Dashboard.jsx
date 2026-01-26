@@ -84,36 +84,23 @@ const getProgressForPeriod = (issue, period) => {
   }
   
   if (period === "6 Months") {
-    // Average of Q1 and Q2 progress
+    // For 6 months: use Q1 + Q2 actual vs Q1 + Q2 target
     const q1Actual = parseFloat(getField(issue, "1ኛ ሩብዓመት_አፈጻጸም") || "0");
     const q2Actual = parseFloat(getField(issue, "2ኛ ሩብዓመት_አፈጻጸም") || "0");
     const q1Target = parseFloat(getField(issue, "1ኛ ሩብዓመት") || "0");
     const q2Target = parseFloat(getField(issue, "2ኛ ሩብዓመት") || "0");
     
-    let totalProgress = 0;
-    let quartersCount = 0;
+    const totalActual = q1Actual + q2Actual;
+    const totalTarget = q1Target + q2Target;
     
-    // Q1 progress
-    if (q1Target > 0) {
-      const q1Progress = (q1Actual * 100) / q1Target;
-      totalProgress += Math.min(100, Math.max(0, q1Progress));
-      quartersCount++;
-    }
+    if (totalTarget <= 0) return 0;
     
-    // Q2 progress
-    if (q2Target > 0) {
-      const q2Progress = (q2Actual * 100) / q2Target;
-      totalProgress += Math.min(100, Math.max(0, q2Progress));
-      quartersCount++;
-    }
-    
-    if (quartersCount === 0) return 0;
-    
-    return Math.round(totalProgress / quartersCount);
+    const progress = (totalActual * 100) / totalTarget;
+    return Math.round(Math.min(100, Math.max(0, progress)));
   }
   
   if (period === "9 Months") {
-    // Average of Q1, Q2, and Q3 progress
+    // For 9 months: use Q1 + Q2 + Q3 actual vs Q1 + Q2 + Q3 target
     const q1Actual = parseFloat(getField(issue, "1ኛ ሩብዓመት_አፈጻጸም") || "0");
     const q2Actual = parseFloat(getField(issue, "2ኛ ሩብዓመት_አፈጻጸም") || "0");
     const q3Actual = parseFloat(getField(issue, "3ኛ ሩብዓመት_አፈጻጸም") || "0");
@@ -121,33 +108,13 @@ const getProgressForPeriod = (issue, period) => {
     const q2Target = parseFloat(getField(issue, "2ኛ ሩብዓመት") || "0");
     const q3Target = parseFloat(getField(issue, "3ኛ ሩብዓመት") || "0");
     
-    let totalProgress = 0;
-    let quartersCount = 0;
+    const totalActual = q1Actual + q2Actual + q3Actual;
+    const totalTarget = q1Target + q2Target + q3Target;
     
-    // Q1 progress
-    if (q1Target > 0) {
-      const q1Progress = (q1Actual * 100) / q1Target;
-      totalProgress += Math.min(100, Math.max(0, q1Progress));
-      quartersCount++;
-    }
+    if (totalTarget <= 0) return 0;
     
-    // Q2 progress
-    if (q2Target > 0) {
-      const q2Progress = (q2Actual * 100) / q2Target;
-      totalProgress += Math.min(100, Math.max(0, q2Progress));
-      quartersCount++;
-    }
-    
-    // Q3 progress
-    if (q3Target > 0) {
-      const q3Progress = (q3Actual * 100) / q3Target;
-      totalProgress += Math.min(100, Math.max(0, q3Progress));
-      quartersCount++;
-    }
-    
-    if (quartersCount === 0) return 0;
-    
-    return Math.round(totalProgress / quartersCount);
+    const progress = (totalActual * 100) / totalTarget;
+    return Math.round(Math.min(100, Math.max(0, progress)));
   }
   
   // For quarterly periods
@@ -687,6 +654,226 @@ const countOneLevelIssuesWithSubIssues = async (oneLevelIssues, currentUserId) =
   return count;
 };
 
+// Get total weight: Sum of የግል እቅድ weights + ዝርዝር ተግባራት weights where there is no የግል እቅድ
+const getTotalCombinedWeight = (oneLevelIssues, twoLevelIssues) => {
+  // First, get all የግል እቅድ parent issue IDs (these are the parents of 2-level issues)
+  const yegelEkidParentIds = new Set();
+  
+  twoLevelIssues.forEach(issue => {
+    if (issue.parent && issue.parent.id) {
+      // Get the parent ID (this is the የግል እቅድ issue)
+      yegelEkidParentIds.add(issue.parent.id);
+    }
+  });
+  
+  console.log(`Found ${yegelEkidParentIds.size} unique የግል እቅድ parent IDs`);
+  
+  // Sum weights: 
+  // 1. All የግል እቅድ weights (from 2-level issues)
+  let totalYegelEkidWeight = 0;
+  twoLevelIssues.forEach(issue => {
+    totalYegelEkidWeight += getWeight(issue);
+  });
+  
+  // 2. ዝርዝር ተግባራት weights where there is NO corresponding የግል እቅድ
+  let totalZerezirTegezatWeight = 0;
+  let zerezirWithoutYegelCount = 0;
+  
+  oneLevelIssues.forEach(issue => {
+    // Check if this 1-level issue is a የግል እቅድ parent (has children that are 2-level)
+    const isYegelEkidParent = yegelEkidParentIds.has(issue.id);
+    
+    if (!isYegelEkidParent) {
+      // This ዝርዝር ተግባራት doesn't have የግል እቅድ, so include its weight
+      totalZerezirTegezatWeight += getWeight(issue);
+      zerezirWithoutYegelCount++;
+    }
+  });
+  
+  // Total combined weight
+  const totalCombinedWeight = totalYegelEkidWeight + totalZerezirTegezatWeight;
+  
+  return {
+    totalYegelEkidWeight,
+    totalZerezirTegezatWeight,
+    totalCombinedWeight,
+    yegelEkidCount: twoLevelIssues.length,
+    zerezirWithoutYegelCount,
+    yegelEkidParentIds: Array.from(yegelEkidParentIds)
+  };
+};
+
+// Calculate actual weight for each የግል እቅድ
+const calculateYegelEkidActualWeights = (twoLevelIssues, period) => {
+  if (!twoLevelIssues || twoLevelIssues.length === 0) {
+    return {
+      issues: [],
+      totalOriginalWeight: 0,
+      totalActualWeight: 0
+    };
+  }
+  
+  const issuesWithActualWeight = twoLevelIssues.map(issue => {
+    const weight = getWeight(issue);
+    const progress = getProgressForPeriod(issue, period);
+    
+    // Calculate actual weight: (weight * progress) / 100
+    const actualWeight = (weight * progress) / 100;
+    
+    return {
+      id: issue.id,
+      subject: issue.subject,
+      progress,
+      weight,
+      actualWeight,
+      status: issue.status?.name || "Unknown",
+      hasValidTarget: isValidTargetValue(getTargetValue(issue, period), period),
+      actualValue: getActualValue(issue, period),
+      targetValue: getTargetValue(issue, period)
+    };
+  });
+  
+  const totalOriginalWeight = issuesWithActualWeight.reduce((sum, issue) => sum + issue.weight, 0);
+  const totalActualWeight = issuesWithActualWeight.reduce((sum, issue) => sum + issue.actualWeight, 0);
+  
+  return {
+    issues: issuesWithActualWeight,
+    totalOriginalWeight,
+    totalActualWeight
+  };
+};
+
+// NEW: Get total combined weight for a specific period
+const getTotalCombinedWeightForPeriod = (oneLevelIssues, twoLevelIssues, period) => {
+  // Filter issues by period first
+  const filteredOneLevelIssues = filterIssuesByPeriod(oneLevelIssues, period);
+  const filteredTwoLevelIssues = filterIssuesByPeriod(twoLevelIssues, period);
+  
+  // Then calculate combined weight for FILTERED issues
+  return getTotalCombinedWeight(filteredOneLevelIssues, filteredTwoLevelIssues);
+};
+
+// NEW: Calculate performance CORRECTLY for each period
+const calculatePerformance = (period, twoLevelIssues, oneLevelIssues) => {
+  console.log(`Calculating performance for period: ${period}`);
+  
+  if (period === "Yearly" || period.includes("ሩብዓመት")) {
+    // For Yearly and Quarterly: use standard formula
+    const filteredTwoLevelIssues = filterIssuesByPeriod(twoLevelIssues, period);
+    const filteredOneLevelIssues = filterIssuesByPeriod(oneLevelIssues, period);
+    
+    const yegelEkidWeights = calculateYegelEkidActualWeights(filteredTwoLevelIssues, period);
+    const combinedWeightData = getTotalCombinedWeight(filteredOneLevelIssues, filteredTwoLevelIssues);
+    
+    if (combinedWeightData.totalCombinedWeight <= 0) return 0;
+    
+    const performance = (yegelEkidWeights.totalActualWeight * 100) / combinedWeightData.totalCombinedWeight;
+    return Math.round(Math.min(100, Math.max(0, performance)));
+  }
+  
+  if (period === "6 Months") {
+    // For 6 Months: Calculate Q1 and Q2 performance separately, then average
+    console.log("Calculating 6 Months performance...");
+    
+    // Q1 calculation
+    const q1TwoLevelIssues = filterIssuesByPeriod(twoLevelIssues, "1ኛ ሩብዓመት");
+    const q1OneLevelIssues = filterIssuesByPeriod(oneLevelIssues, "1ኛ ሩብዓመት");
+    const q1YegelEkidWeights = calculateYegelEkidActualWeights(q1TwoLevelIssues, "1ኛ ሩብዓመት");
+    const q1CombinedWeight = getTotalCombinedWeight(q1OneLevelIssues, q1TwoLevelIssues);
+    
+    const q1Performance = q1CombinedWeight.totalCombinedWeight > 0 
+      ? (q1YegelEkidWeights.totalActualWeight * 100) / q1CombinedWeight.totalCombinedWeight
+      : 0;
+    
+    console.log(`Q1: actual weight=${q1YegelEkidWeights.totalActualWeight}, combined weight=${q1CombinedWeight.totalCombinedWeight}, performance=${q1Performance}%`);
+    
+    // Q2 calculation
+    const q2TwoLevelIssues = filterIssuesByPeriod(twoLevelIssues, "2ኛ ሩብዓመት");
+    const q2OneLevelIssues = filterIssuesByPeriod(oneLevelIssues, "2ኛ ሩብዓመት");
+    const q2YegelEkidWeights = calculateYegelEkidActualWeights(q2TwoLevelIssues, "2ኛ ሩብዓመት");
+    const q2CombinedWeight = getTotalCombinedWeight(q2OneLevelIssues, q2TwoLevelIssues);
+    
+    const q2Performance = q2CombinedWeight.totalCombinedWeight > 0 
+      ? (q2YegelEkidWeights.totalActualWeight * 100) / q2CombinedWeight.totalCombinedWeight
+      : 0;
+    
+    console.log(`Q2: actual weight=${q2YegelEkidWeights.totalActualWeight}, combined weight=${q2CombinedWeight.totalCombinedWeight}, performance=${q2Performance}%`);
+    
+    // Average of Q1 and Q2 (only count quarters that have data)
+    let totalPerformance = 0;
+    let quartersCount = 0;
+    
+    if (q1CombinedWeight.totalCombinedWeight > 0 && q1TwoLevelIssues.length > 0) {
+      totalPerformance += q1Performance;
+      quartersCount++;
+    }
+    
+    if (q2CombinedWeight.totalCombinedWeight > 0 && q2TwoLevelIssues.length > 0) {
+      totalPerformance += q2Performance;
+      quartersCount++;
+    }
+    
+    const averagePerformance = quartersCount > 0 ? totalPerformance / quartersCount : 0;
+    console.log(`6 Months average: (${q1Performance} + ${q2Performance}) / ${quartersCount} = ${averagePerformance}%`);
+    
+    return Math.round(Math.min(100, Math.max(0, averagePerformance)));
+  }
+  
+  if (period === "9 Months") {
+    // For 9 Months: Calculate Q1, Q2, Q3 performance separately, then average
+    console.log("Calculating 9 Months performance...");
+    
+    let totalPerformance = 0;
+    let quartersCount = 0;
+    
+    // Q1 calculation
+    const q1TwoLevelIssues = filterIssuesByPeriod(twoLevelIssues, "1ኛ ሩብዓመት");
+    const q1OneLevelIssues = filterIssuesByPeriod(oneLevelIssues, "1ኛ ሩብዓመት");
+    const q1YegelEkidWeights = calculateYegelEkidActualWeights(q1TwoLevelIssues, "1ኛ ሩብዓመት");
+    const q1CombinedWeight = getTotalCombinedWeight(q1OneLevelIssues, q1TwoLevelIssues);
+    
+    if (q1CombinedWeight.totalCombinedWeight > 0 && q1TwoLevelIssues.length > 0) {
+      const q1Performance = (q1YegelEkidWeights.totalActualWeight * 100) / q1CombinedWeight.totalCombinedWeight;
+      totalPerformance += q1Performance;
+      quartersCount++;
+      console.log(`Q1 performance: ${q1Performance}%`);
+    }
+    
+    // Q2 calculation
+    const q2TwoLevelIssues = filterIssuesByPeriod(twoLevelIssues, "2ኛ ሩብዓመት");
+    const q2OneLevelIssues = filterIssuesByPeriod(oneLevelIssues, "2ኛ ሩብዓመት");
+    const q2YegelEkidWeights = calculateYegelEkidActualWeights(q2TwoLevelIssues, "2ኛ ሩብዓመት");
+    const q2CombinedWeight = getTotalCombinedWeight(q2OneLevelIssues, q2TwoLevelIssues);
+    
+    if (q2CombinedWeight.totalCombinedWeight > 0 && q2TwoLevelIssues.length > 0) {
+      const q2Performance = (q2YegelEkidWeights.totalActualWeight * 100) / q2CombinedWeight.totalCombinedWeight;
+      totalPerformance += q2Performance;
+      quartersCount++;
+      console.log(`Q2 performance: ${q2Performance}%`);
+    }
+    
+    // Q3 calculation
+    const q3TwoLevelIssues = filterIssuesByPeriod(twoLevelIssues, "3ኛ ሩብዓመት");
+    const q3OneLevelIssues = filterIssuesByPeriod(oneLevelIssues, "3ኛ ሩብዓመት");
+    const q3YegelEkidWeights = calculateYegelEkidActualWeights(q3TwoLevelIssues, "3ኛ ሩብዓመት");
+    const q3CombinedWeight = getTotalCombinedWeight(q3OneLevelIssues, q3TwoLevelIssues);
+    
+    if (q3CombinedWeight.totalCombinedWeight > 0 && q3TwoLevelIssues.length > 0) {
+      const q3Performance = (q3YegelEkidWeights.totalActualWeight * 100) / q3CombinedWeight.totalCombinedWeight;
+      totalPerformance += q3Performance;
+      quartersCount++;
+      console.log(`Q3 performance: ${q3Performance}%`);
+    }
+    
+    const averagePerformance = quartersCount > 0 ? totalPerformance / quartersCount : 0;
+    console.log(`9 Months average: total=${totalPerformance}, quarters=${quartersCount}, average=${averagePerformance}%`);
+    
+    return Math.round(Math.min(100, Math.max(0, averagePerformance)));
+  }
+  
+  return 0;
+};
+
 const Dashboard = () => {
   const [allAssignedIssues, setAllAssignedIssues] = useState([]);
   const [oneLevelHierarchyIssues, setOneLevelHierarchyIssues] = useState([]);
@@ -712,6 +899,19 @@ const Dashboard = () => {
     hierarchyValidated: false
   });
   const [oneLevelWithSubIssuesCount, setOneLevelWithSubIssuesCount] = useState(0);
+  const [calculatedPerformance, setCalculatedPerformance] = useState(0);
+  const [yegelEkidActualWeights, setYegelEkidActualWeights] = useState({
+    issues: [],
+    totalOriginalWeight: 0,
+    totalActualWeight: 0
+  });
+  const [combinedWeightData, setCombinedWeightData] = useState({
+    totalYegelEkidWeight: 0,
+    totalZerezirTegezatWeight: 0,
+    totalCombinedWeight: 0,
+    yegelEkidCount: 0,
+    zerezirWithoutYegelCount: 0
+  });
 
   // Use refs to avoid unnecessary re-renders
   const abortControllerRef = useRef(null);
@@ -843,7 +1043,7 @@ const Dashboard = () => {
     }
   }, []);
 
-  // Initial data load
+  // Initial data load - ONLY ONCE
   useEffect(() => {
     isMountedRef.current = true;
     abortControllerRef.current = new AbortController();
@@ -887,16 +1087,7 @@ const Dashboard = () => {
         setOneLevelHierarchyIssues(oneLevel);
         setTwoLevelHierarchyIssues(twoLevel);
         
-        // 4. Calculate 1-Level Hierarchy Performance with Actual Weight
-        const oneLevelPerformance = await calculateOneLevelPerformance(
-          oneLevel, 
-          currentUser.id, 
-          selectedPeriod
-        );
-        
-        setOneLevelPerformanceData(oneLevelPerformance);
-        
-        // 5. Count 1-level issues with sub-issues assigned to user
+        // 4. Count 1-level issues with sub-issues assigned to user
         const withSubIssuesCount = await countOneLevelIssuesWithAssignedSubIssues(
           oneLevel, 
           currentUser.id
@@ -904,7 +1095,7 @@ const Dashboard = () => {
         
         setOneLevelWithSubIssuesCount(withSubIssuesCount);
         
-        // 6. Extract unique statuses from all assigned issues
+        // 5. Extract unique statuses from all assigned issues
         const uniqueStatuses = Array.from(
           new Map(
             allAssigned
@@ -936,37 +1127,9 @@ const Dashboard = () => {
         abortControllerRef.current.abort();
       }
     };
-  }, [loadAllAssignedIssues, loadHierarchyIssues, calculateOneLevelPerformance, countOneLevelIssuesWithAssignedSubIssues]);
+  }, [loadAllAssignedIssues, loadHierarchyIssues, countOneLevelIssuesWithAssignedSubIssues]);
 
-  // Recalculate performance when period or filter changes
-  useEffect(() => {
-    if (initialLoading) return; // Skip if initial data hasn't loaded yet
-    
-    async function recalculatePerformance() {
-      setLoading(true);
-      
-      try {
-        if (user && oneLevelHierarchyIssues.length > 0) {
-          // Recalculate 1-Level Performance
-          const oneLevelPerformance = await calculateOneLevelPerformance(
-            oneLevelHierarchyIssues, 
-            user.id, 
-            selectedPeriod
-          );
-          
-          setOneLevelPerformanceData(oneLevelPerformance);
-        }
-      } catch (error) {
-        console.error("Error recalculating performance:", error);
-      } finally {
-        setLoading(false);
-      }
-    }
-    
-    recalculatePerformance();
-  }, [selectedPeriod, filterStatus, initialLoading, user, oneLevelHierarchyIssues, calculateOneLevelPerformance]);
-
-  // Memoized filtered issues for both hierarchy levels
+  // Memoized filtered issues for both hierarchy levels - NO API CALLS HERE
   const filteredOneLevelIssues = useMemo(() => {
     let filtered = filterIssuesByPeriod(oneLevelHierarchyIssues, selectedPeriod);
     
@@ -997,10 +1160,60 @@ const Dashboard = () => {
     return filtered;
   }, [twoLevelHierarchyIssues, selectedPeriod, filterStatus]);
 
-  // Calculate 2-Level Hierarchy Performance (uses weighted average)
+  // Calculate 2-Level Hierarchy Performance (uses weighted average) - NO API CALLS
   const twoLevelHierarchyPerformance = useMemo(() => {
     return calculateTwoLevelHierarchyPerformance(filteredTwoLevelIssues, selectedPeriod);
   }, [filteredTwoLevelIssues, selectedPeriod]);
+
+  // Calculate FILTERED actual weights for የግል እቅድ - NO API CALLS
+  const filteredYegelEkidActualWeights = useMemo(() => {
+    return calculateYegelEkidActualWeights(filteredTwoLevelIssues, selectedPeriod);
+  }, [filteredTwoLevelIssues, selectedPeriod]);
+
+  // Calculate FILTERED combined weight - NO API CALLS
+  const filteredCombinedWeightData = useMemo(() => {
+    return getTotalCombinedWeight(filteredOneLevelIssues, filteredTwoLevelIssues);
+  }, [filteredOneLevelIssues, filteredTwoLevelIssues]);
+
+  // Calculate FILTERED performance - NO API CALLS
+  const filteredCalculatedPerformance = useMemo(() => {
+    return calculatePerformance(selectedPeriod, filteredTwoLevelIssues, filteredOneLevelIssues);
+  }, [selectedPeriod, filteredTwoLevelIssues, filteredOneLevelIssues]);
+
+  // Calculate 1-Level Performance - This may need async calculation
+  const calculateOneLevelPerformanceMemoized = useCallback(async () => {
+    if (!user || filteredOneLevelIssues.length === 0) {
+      setOneLevelPerformanceData({
+        performance: 0,
+        totalIssueWeight: 0,
+        totalActualWeight: 0,
+        issueDetails: []
+      });
+      return;
+    }
+    
+    setLoading(true);
+    try {
+      const performanceData = await calculateOneLevelPerformance(
+        filteredOneLevelIssues, 
+        user.id, 
+        selectedPeriod
+      );
+      
+      setOneLevelPerformanceData(performanceData);
+    } catch (error) {
+      console.error("Error calculating 1-level performance:", error);
+    } finally {
+      setLoading(false);
+    }
+  }, [user, filteredOneLevelIssues, selectedPeriod, calculateOneLevelPerformance]);
+
+  // Calculate 1-level performance when filters change
+  useEffect(() => {
+    if (initialLoading) return;
+    
+    calculateOneLevelPerformanceMemoized();
+  }, [calculateOneLevelPerformanceMemoized, initialLoading]);
 
   // Prepare chart data for 2-level hierarchy issues (showing 2-level in detailed analysis)
   const chartData = useMemo(() => {
@@ -1094,6 +1307,19 @@ const Dashboard = () => {
       totalActualWeight: 0,
       issueDetails: []
     });
+    setCalculatedPerformance(0);
+    setYegelEkidActualWeights({
+      issues: [],
+      totalOriginalWeight: 0,
+      totalActualWeight: 0
+    });
+    setCombinedWeightData({
+      totalYegelEkidWeight: 0,
+      totalZerezirTegezatWeight: 0,
+      totalCombinedWeight: 0,
+      yegelEkidCount: 0,
+      zerezirWithoutYegelCount: 0
+    });
     setHierarchyInfo({
       totalAssignedIssues: 0,
       oneLevelHierarchyIssues: 0,
@@ -1115,14 +1341,6 @@ const Dashboard = () => {
       const { oneLevel, twoLevel } = await loadHierarchyIssues(allAssigned);
       setOneLevelHierarchyIssues(oneLevel);
       setTwoLevelHierarchyIssues(twoLevel);
-      
-      // Recalculate 1-Level Performance
-      const oneLevelPerformance = await calculateOneLevelPerformance(
-        oneLevel, 
-        currentUser.id, 
-        selectedPeriod
-      );
-      setOneLevelPerformanceData(oneLevelPerformance);
       
       // Count 1-level issues with sub-issues assigned to user
       const withSubIssuesCount = await countOneLevelIssuesWithAssignedSubIssues(
@@ -1316,19 +1534,7 @@ const Dashboard = () => {
         <p style={{ fontSize: '18px', color: '#666' }}>
           Loading dashboard data...
         </p>
-        {hierarchyInfo.totalAssignedIssues > 0 && !hierarchyInfo.hierarchyValidated && (
-          <div style={{
-            marginTop: '20px',
-            padding: '10px 20px',
-            backgroundColor: '#e3f2fd',
-            borderRadius: '8px',
-            fontSize: '14px',
-            color: '#1565c0'
-          }}>
-            <p>Found {hierarchyInfo.totalAssignedIssues} assigned issues</p>
-            <p>Calculating Actual Weight for 1-Level Issues...</p>
-          </div>
-        )}
+       
         <style>{`
           @keyframes spin {
             0% { transform: rotate(0deg); }
@@ -1374,36 +1580,7 @@ const Dashboard = () => {
   return (
     <div style={{ width: "100%", fontFamily: "Arial, sans-serif", padding: "20px", maxWidth: "1400px", margin: "0 auto" }}>
       
-      {/* Header */}
-      <div style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: '30px',
-        flexWrap: 'wrap',
-        gap: '20px'
-      }}>
-        <div>
-          <h1 style={{ margin: 0, color: '#333', display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <span style={{ fontSize: '28px' }}>📊</span>
-            Dashboard
-          </h1>
-        </div>
-        <div style={{ 
-          fontSize: '14px', 
-          color: '#666', 
-          backgroundColor: '#f0f7ff',
-          padding: '8px 16px',
-          borderRadius: '20px',
-          fontWeight: '500',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '10px'
-        }}>
-          <span style={{ fontSize: '18px' }}>👤</span>
-          {user && `${user.firstname} ${user.lastname}`}
-        </div>
-      </div>
+      
 
       {/* Summary Cards */}
       <div style={{
@@ -1422,7 +1599,7 @@ const Dashboard = () => {
         }}>
           <div style={{ fontSize: '12px', color: '#666', marginBottom: '5px' }}>Total assigned ዝርዝር ተግባራት</div>
           <div style={{ fontSize: '28px', fontWeight: 'bold', color: '#2196F3' }}>{oneLevelHierarchyIssues.length}</div>
-          <div style={{ fontSize: '11px', color: '#888', marginTop: '5px' }}>Issue → Parent (no further parent)</div>
+          
         </div>
 
         <div style={{
@@ -1435,7 +1612,7 @@ const Dashboard = () => {
         }}>
           <div style={{ fontSize: '12px', color: '#666', marginBottom: '5px' }}>Total የግል እቅድ ያላቸው assigned ዝርዝር ተግባራት</div>
           <div style={{ fontSize: '28px', fontWeight: 'bold', color: '#9C27B0' }}>{oneLevelWithSubIssuesCount}</div>
-          <div style={{ fontSize: '11px', color: '#888', marginTop: '5px' }}>1-Level issues with sub-issues assigned to you</div>
+          
         </div>
 
         <div style={{
@@ -1448,7 +1625,7 @@ const Dashboard = () => {
         }}>
           <div style={{ fontSize: '12px', color: '#666', marginBottom: '5px' }}>Total የግል እቅድ</div>
           <div style={{ fontSize: '28px', fontWeight: 'bold', color: '#4CAF50' }}>{twoLevelHierarchyIssues.length}</div>
-          <div style={{ fontSize: '11px', color: '#888', marginTop: '5px' }}>Issue → Parent → Grandparent</div>
+          
         </div>
       </div>
 
@@ -1493,7 +1670,7 @@ const Dashboard = () => {
           {/* Filter Controls in Performance Tab */}
           <FilterControls />
           
-          {/* Dual Performance Bars */}
+          {/* Performance Summary */}
           <div style={{ marginBottom: '40px' }}>
             <h3 style={{ 
               marginBottom: '20px', 
@@ -1503,220 +1680,114 @@ const Dashboard = () => {
               gap: '10px'
             }}>
               <span style={{ fontSize: '20px' }}>📈</span>
-              Performance Comparison
+              Performance Summary
             </h3>
             
-            {/* 1-Level Hierarchy Issues Performance - Changed text */}
-            <div style={{ marginBottom: '30px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                <div style={{ fontWeight: "bold", fontSize: "16px", color: '#333', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <div style={{ width: '12px', height: '12px', backgroundColor: '#2196F3', borderRadius: '2px' }}></div>
-                  Performance based on assigned ዝርዝር ተግባራት
-                </div>
-                <div style={{ 
-                  fontSize: '14px', 
-                  color: '#666', 
-                  backgroundColor: '#e3f2fd',
-                  padding: '4px 10px',
-                  borderRadius: '20px',
-                  fontWeight: '500',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '5px'
-                }}>
-                  {loading ? (
-                    <>
-                      <div style={{
-                        width: '12px',
-                        height: '12px',
-                        border: '2px solid #f3f3f3',
-                        borderTop: '2px solid #3498db',
-                        borderRadius: '50%',
-                        animation: 'spin 1s linear infinite'
-                      }}></div>
-                      Calculating...
-                    </>
-                  ) : (
-                    `${oneLevelPerformanceData.performance}% • ${filteredOneLevelIssues.length} issues`
-                  )}
-                </div>
-              </div>
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
+              gap: '20px'
+            }}>
               
+              {/* Performance Card */}
               <div style={{
-                width: "100%",
-                backgroundColor: "#f0f0f0",
-                borderRadius: "8px",
-                overflow: "hidden",
-                height: "30px",
-                position: 'relative'
-              }}>
-                <div
-                  style={{
-                    width: `${oneLevelPerformanceData.performance || 0}%`,
-                    backgroundColor: '#2196F3',
-                    height: "100%",
-                    textAlign: "center",
-                    color: "#fff",
-                    fontWeight: "bold",
-                    lineHeight: "30px",
-                    transition: 'width 0.8s ease',
-                    position: 'relative'
-                  }}
-                >
-                  <div style={{
-                    position: 'absolute',
-                    right: '10px',
-                    top: '50%',
-                    transform: 'translateY(-50%)',
-                    fontWeight: 'bold',
-                    fontSize: '12px'
-                  }}>
-                    {oneLevelPerformanceData.performance}%
-                  </div>
-                </div>
-              </div>
-              
-              <div style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                marginTop: '5px',
-                padding: '0 5px',
-                fontSize: '11px',
-                color: '#666'
-              }}>
-                <span>Formula: Actual Weight = (Issue Weight × Avg Sub-Issues Progress %) ÷ 100</span>
-                <span>Performance = (∑Actual Weight × 100) ÷ ∑Issue Weight</span>
-              </div>
-              
-              <div style={{
-                marginTop: '10px',
-                padding: '10px',
-                backgroundColor: '#f9f9f9',
-                borderRadius: '6px',
-                fontSize: '11px',
-                color: '#666',
-                borderLeft: '3px solid #2196F3'
-              }}>
-                <strong>Calculation Formulas:</strong>
-                <div style={{ marginTop: '5px' }}>
-                  Yearly: ((Q1_actual + Q2_actual + Q3_actual + Q4_actual) × 100) ÷ yearly_target
-                </div>
-                <div>
-                  Quarterly: (quarter_actual × 100) ÷ quarter_target
-                </div>
-              </div>
-              
-              {/* 1-Level Performance Details - Changed text */}
-              <div style={{
-                marginTop: '15px',
-                padding: '15px',
+                padding: '20px',
                 backgroundColor: '#f8f9fa',
                 borderRadius: '8px',
                 border: '1px solid #e0e0e0'
               }}>
-                <div style={{ fontSize: '13px', fontWeight: 'bold', marginBottom: '10px', color: '#333' }}>
-                  Performance Calculation Details:
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '10px', fontSize: '12px' }}>
-                  <div>
-                    <span style={{ color: '#666' }}>Total Issue Weight:</span>
-                    <span style={{ fontWeight: 'bold', marginLeft: '5px' }}>
-                      {oneLevelPerformanceData.totalIssueWeight.toFixed(2)}
-                    </span>
-                  </div>
-                  <div>
-                    <span style={{ color: '#666' }}>Total Actual Weight:</span>
-                    <span style={{ fontWeight: 'bold', marginLeft: '5px' }}>
-                      {oneLevelPerformanceData.totalActualWeight.toFixed(2)}
-                    </span>
-                  </div>
-                  <div>
-                    <span style={{ color: '#666' }}>Weight Ratio:</span>
-                    <span style={{ fontWeight: 'bold', marginLeft: '5px' }}>
-                      {oneLevelPerformanceData.totalIssueWeight > 0 
-                        ? Math.round((oneLevelPerformanceData.totalActualWeight / oneLevelPerformanceData.totalIssueWeight) * 100) 
-                        : 0}%
-                    </span>
-                  </div>
-                  <div>
-                    <span style={{ color: '#666' }}>Filtered Issues:</span>
-                    <span style={{ fontWeight: 'bold', marginLeft: '5px' }}>
-                      {filteredOneLevelIssues.length}
-                    </span>
-                  </div>
-                  <div>
-                    <span style={{ color: '#666' }}>Data Source:</span>
-                    <span style={{ fontWeight: 'bold', marginLeft: '5px' }}>
-                      አፈጻጸም Custom Fields
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </div>
-            
-            {/* 2-Level Hierarchy Issues Performance - Changed text */}
-            <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                <div style={{ fontWeight: "bold", fontSize: "16px", color: '#333', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <div style={{ width: '12px', height: '12px', backgroundColor: '#9C27B0', borderRadius: '2px' }}></div>
-                  Performance based on assigned የግል እቅድ
-                </div>
-                <div style={{ 
-                  fontSize: '14px', 
-                  color: '#666', 
-                  backgroundColor: '#f3e5f5',
-                  padding: '4px 10px',
-                  borderRadius: '20px',
-                  fontWeight: '500'
+                <h4 style={{ marginBottom: '15px', color: '#333', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '18px' }}>📈</span>
+                  Performance
+                </h4>
+                
+                <div style={{
+                  display: 'grid',
+                  gap: '12px',
+                  fontSize: '14px'
                 }}>
-                  {twoLevelHierarchyPerformance}% • {filteredTwoLevelIssues.length} issues
-                </div>
-              </div>
-              
-              <div style={{
-                width: "100%",
-                backgroundColor: "#f0f0f0",
-                borderRadius: "8px",
-                overflow: "hidden",
-                height: "30px",
-                position: 'relative'
-              }}>
-                <div
-                  style={{
-                    width: `${twoLevelHierarchyPerformance || 0}%`,
-                    backgroundColor: '#9C27B0',
-                    height: "100%",
-                    textAlign: "center",
-                    color: "#fff",
-                    fontWeight: "bold",
-                    lineHeight: "30px",
-                    transition: 'width 0.8s ease',
-                    position: 'relative'
-                  }}
-                >
-                  <div style={{
-                    position: 'absolute',
-                    right: '10px',
-                    top: '50%',
-                    transform: 'translateY(-50%)',
-                    fontWeight: 'bold',
-                    fontSize: '12px'
+                  {/* Performance Calculation */}
+                  <div style={{ 
+                    display: 'flex', 
+                    justifyContent: 'space-between',
+                    padding: '15px',
+                    backgroundColor: '#e3f2fd',
+                    borderRadius: '6px',
+                    borderLeft: '4px solid #1976d2',
+                    border: '2px solid #1976d2'
                   }}>
-                    {twoLevelHierarchyPerformance}%
+                    <div>
+                      <div style={{ color: '#666', fontSize: '12px' }}>Calculated Performance</div>
+                      <div style={{ fontWeight: 'bold', color: getProgressColor(filteredCalculatedPerformance), fontSize: '24px' }}>
+                        {filteredCalculatedPerformance}%
+                      </div>
+                    
+                    </div>
+                    <div style={{ fontSize: '32px', color: '#1976d2' }}>📈</div>
                   </div>
                 </div>
               </div>
               
+              {/* Combined Weight Summary Card - UPDATED */}
               <div style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                marginTop: '5px',
-                padding: '0 5px',
-                fontSize: '11px',
-                color: '#666'
+                padding: '20px',
+                backgroundColor: '#f8f9fa',
+                borderRadius: '8px',
+                border: '1px solid #e0e0e0'
               }}>
-                <span>Uses weighted average based on issue weights</span>
-                <span>Performance = (∑(Weight × Progress %) ÷ ∑Weight) × 100</span>
+                <h4 style={{ marginBottom: '15px', color: '#333', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '18px' }}>⚖️</span>
+                  ክብደት Summary ({selectedPeriod})
+                </h4>
+                
+                <div style={{
+                  display: 'grid',
+                  gap: '12px',
+                  fontSize: '14px'
+                }}>
+                  {/* Combined Total Weight */}
+                  <div style={{ 
+                    display: 'flex', 
+                    justifyContent: 'space-between',
+                    padding: '12px',
+                    backgroundColor: '#f5f5f5',
+                    borderRadius: '6px',
+                    borderLeft: '4px solid #9C27B0',
+                    
+                    border: '1px solid #e0e0e0'
+                  }}>
+                    <div>
+                      <div style={{ color: '#666', fontSize: '12px' }}>Target Weight</div>
+                      <div style={{ fontWeight: 'bold', color: '#7b1fa2', fontSize: '16px' }}>
+                        {filteredCombinedWeightData.totalCombinedWeight.toFixed(2)}
+                      </div>
+                      
+                    </div>
+                    <div style={{ fontSize: '24px', color: '#9C27B0' }}>⚖️</div>
+                  </div>
+                </div>
+                  {/* የግል እቅድ Actual Weight Section */}
+                  <div style={{ 
+                    display: 'flex', 
+                    justifyContent: 'space-between',
+                    padding: '12px',
+                    backgroundColor: '#e3f2fd',
+                    borderRadius: '6px',
+
+                    borderLeft: '4px solid #2196F3',
+                    marginTop: '5px'
+                  }}>
+                    <div>
+                      <div style={{ color: '#666', fontSize: '12px' }}>Contributed weight</div>
+                      <div style={{ fontWeight: 'bold', color: '#1565c0', fontSize: '16px' }}>
+                        {filteredYegelEkidActualWeights.totalActualWeight.toFixed(2)}
+                      </div>
+                      
+                    </div>
+                    <div style={{ fontSize: '24px', color: '#2196F3' }}>📊</div>
+                  </div>
+                  
+                  
               </div>
             </div>
           </div>
@@ -1876,23 +1947,7 @@ const Dashboard = () => {
                                 Issue #{data.id} (የግል እቅድ)
                               </div>
                               
-                              {/* Hierarchy Info */}
-                              <div style={{
-                                marginBottom: '10px',
-                                padding: '8px',
-                                backgroundColor: '#e3f2fd',
-                                borderRadius: '6px',
-                                fontSize: '12px',
-                                borderLeft: '3px solid #1976d2'
-                              }}>
-                                <div style={{ fontWeight: 'bold', color: '#1976d2' }}>
-                                  <span style={{ fontSize: '14px', marginRight: '5px' }}>↳↳</span>
-                                  2-Level Hierarchy Confirmed
-                                </div>
-                                <div style={{ fontSize: '11px', color: '#555', marginTop: '3px' }}>
-                                  Issue → Parent → Grandparent
-                                </div>
-                              </div>
+                             
                               
                               <div style={{ 
                                 fontSize: '13px', 
@@ -1961,28 +2016,7 @@ const Dashboard = () => {
                                 </div>
                               </div>
                               
-                              <div style={{
-                                marginTop: '15px',
-                                padding: '10px',
-                                backgroundColor: '#f0f7ff',
-                                borderRadius: '6px',
-                                fontSize: '12px',
-                                borderLeft: '3px solid #1976d2'
-                              }}>
-                                <div style={{ fontWeight: 'bold', color: '#1976d2', marginBottom: '5px' }}>
-                                  <span style={{ fontSize: '14px', marginRight: '5px' }}>📊</span>
-                                  Calculation Formula
-                                </div>
-                                <div style={{ fontSize: '11px', color: '#555' }}>
-                                  {selectedPeriod === 'Yearly' ? (
-                                    <span>((Q1_actual + Q2_actual + Q3_actual + Q4_actual) × 100) ÷ yearly_target</span>
-                                  ) : selectedPeriod.includes('ሩብዓመት') ? (
-                                    <span>(quarter_actual × 100) ÷ quarter_target</span>
-                                  ) : (
-                                    <span>Average of quarter progress percentages</span>
-                                  )}
-                                </div>
-                              </div>
+                              
                             </div>
                           );
                         }
@@ -2164,9 +2198,6 @@ const Dashboard = () => {
           )}
         </div>
       )}
-
-      
-      
 
       <style>{`
         @keyframes spin {
