@@ -32,6 +32,9 @@ export default function AddSubIssue() {
   const [childIssuesMap, setChildIssuesMap] = useState(new Map()); // Child issues grouped by parent ID
   const [subIssuesMap, setSubIssuesMap] = useState(new Map()); // Sub-issues grouped by child ID
   
+  // Filter state
+  const [filterType, setFilterType] = useState("all"); // "all" or "childWithoutSubIssues"
+  
   const [parentId, setParentId] = useState("");
   const [parentIssue, setParentIssue] = useState(null);
   const [subject, setSubject] = useState("");
@@ -47,7 +50,7 @@ export default function AddSubIssue() {
   const [statuses, setStatuses] = useState([]);
   const [deleting, setDeleting] = useState(false);
 
-  // Fields to exclude from custom fields
+  // Fields to exclude from custom fields - Updated: removed mandatory fields
   const excludedFields = [
     "የአፈጻጸም አመልካች",
     "የእድገት ሪፖርት ማጠቃለያ",
@@ -58,6 +61,116 @@ export default function AddSubIssue() {
     "3ኛ ሩብዓመት_አፈጻጸም",
     "4ኛ ሩብዓመት_አፈጻጸም"  
   ];
+
+  // FIXED ORDER of fields as specified
+  const fieldOrder = [
+    "መለኪያ",
+    "ክብደት",
+    "የዓመቱ እቅድ",
+    "1ኛ ሩብዓመት",
+    "2ኛ ሩብዓመት",
+    "3ኛ ሩብዓመት",
+    "4ኛ ሩብዓመት",
+    "የሚጠበቅ ውጤት"
+  ];
+
+  // List of always mandatory fields
+  const alwaysMandatoryFields = [
+    "መለኪያ",
+    "ክብደት",
+    "የዓመቱ እቅድ",
+    "የሚጠበቅ ውጤት"
+  ];
+
+  // Quarter fields that become mandatory if parent has them
+  const quarterFields = [
+    "1ኛ ሩብዓመት",
+    "2ኛ ሩብዓመት",
+    "3ኛ ሩብዓመት",
+    "4ኛ ሩብዓመት"
+  ];
+
+  // Field that should show parent value hint
+  const fieldWithParentValueHint = "መለኪያ";
+
+  // Helper function to get custom field value
+  const getCustomFieldValue = (issue, fieldName) => {
+    if (!issue || !issue.custom_fields) return "";
+    
+    const field = issue.custom_fields.find(cf => cf.name === fieldName);
+    return field ? field.value || "" : "";
+  };
+
+  // Helper function to check if a field has value (not empty and not zero)
+  const fieldHasValue = (issue, fieldName) => {
+    const value = getCustomFieldValue(issue, fieldName);
+    return value && value !== "" && value !== "0" && value !== 0;
+  };
+
+  // Helper function to get quarter fields that are mandatory for parent
+  const getMandatoryQuarterFieldsForParent = (parentIssue) => {
+    if (!parentIssue) return [];
+    
+    return quarterFields.filter(fieldName => 
+      fieldHasValue(parentIssue, fieldName)
+    );
+  };
+
+  // Helper function to sort custom fields according to the fixed order
+  const sortCustomFieldsByFixedOrder = (fields) => {
+    return [...fields].sort((a, b) => {
+      const indexA = fieldOrder.indexOf(a.name);
+      const indexB = fieldOrder.indexOf(b.name);
+      
+      // If both fields are in the order list, sort by the order
+      if (indexA !== -1 && indexB !== -1) {
+        return indexA - indexB;
+      }
+      
+      // If only one is in the order list, put it first
+      if (indexA !== -1) return -1;
+      if (indexB !== -1) return 1;
+      
+      // If neither is in the order list, keep original order
+      return 0;
+    });
+  };
+
+  // Helper function to get assignee name
+  const getAssigneeName = (issue) => {
+    if (!issue) return "Unassigned";
+    
+    // Debug log
+    console.log("Assignee data for issue:", {
+      issueId: issue.id,
+      assigned_to: issue.assigned_to,
+      type: typeof issue.assigned_to
+    });
+    
+    // Check for assigned_to object
+    if (issue.assigned_to && typeof issue.assigned_to === 'object') {
+      const firstName = issue.assigned_to.firstname || '';
+      const lastName = issue.assigned_to.lastname || '';
+      const fullName = `${firstName} ${lastName}`.trim();
+      
+      if (fullName) return fullName;
+      
+      // If no name, try using the name field
+      if (issue.assigned_to.name) return issue.assigned_to.name;
+    }
+    
+    // Fallback: check if assigned_to is just an ID
+    if (issue.assigned_to && typeof issue.assigned_to === 'number') {
+      return `User ID: ${issue.assigned_to}`;
+    }
+    
+    // Check for author if no assignee
+    if (issue.author) {
+      return `${issue.author.firstname || ''} ${issue.author.lastname || ''}`.trim();
+    }
+    
+    return "Unassigned";
+  };
 
   // Load current user FIRST
   useEffect(() => {
@@ -75,6 +188,23 @@ export default function AddSubIssue() {
     loadCurrentUser();
   }, []);
 
+  // Enhanced function to fetch issue with assignee details
+  const fetchIssueWithDetails = async (issueId) => {
+    try {
+      const issue = await getIssue(issueId);
+      console.log(`Fetched issue ${issueId}:`, {
+        id: issue?.id,
+        subject: issue?.subject,
+        assigned_to: issue?.assigned_to,
+        assigned_to_type: typeof issue?.assigned_to
+      });
+      return issue;
+    } catch (error) {
+      console.error(`Error fetching issue ${issueId}:`, error);
+      throw error;
+    }
+  };
+
   // Then load issues in the new hierarchy
   useEffect(() => {
     async function loadIssuesHierarchy() {
@@ -84,48 +214,78 @@ export default function AddSubIssue() {
       try {
         // Fetch ALL issues assigned to current user (single API call)
         const allAssignedIssues = await getIssuesAssignedToMe();
+        console.log("All assigned issues:", allAssignedIssues.map(issue => ({
+          id: issue.id,
+          subject: issue.subject,
+          assigned_to: issue.assigned_to,
+          parent: issue.parent
+        })));
         
         // Step 1: Create sets for tracking unique issues
         const childIssues = new Map(); // childId -> childIssue
         const parentIds = new Set(); // unique parent IDs
         const subIssuesByChildId = new Map(); // childId -> [subIssues]
         
-        // First pass: Identify child issues and collect parent IDs
-        allAssignedIssues.forEach(issue => {
-          if (issue.parent && issue.parent.id) {
-            // This is either a child issue or a sub-issue
-            parentIds.add(issue.parent.id);
+        // Step 2: Identify ALL issues with parents
+        const issuesWithParents = allAssignedIssues.filter(issue => 
+          issue.parent && issue.parent.id
+        );
+        
+        // Step 3: Create a map of parent-child relationships
+        const parentChildMap = new Map(); // parentId -> [children]
+        
+        // Build the parent-child relationships
+        issuesWithParents.forEach(issue => {
+          const parentId = issue.parent.id;
+          if (!parentChildMap.has(parentId)) {
+            parentChildMap.set(parentId, []);
+          }
+          parentChildMap.get(parentId).push(issue);
+        });
+        
+        // Step 4: Identify which parent IDs are also child issues
+        const childIssueIds = new Set();
+        issuesWithParents.forEach(issue => {
+          // If this issue's parent ID is in our issues list, then the parent is a child issue
+          if (issuesWithParents.some(parentIssue => parentIssue.id === issue.parent.id)) {
+            childIssueIds.add(issue.parent.id);
           }
         });
         
-        // Second pass: Separate child issues from sub-issues
-        allAssignedIssues.forEach(issue => {
-          if (issue.parent && issue.parent.id) {
-            // Check if this issue's parent is in parentIds
-            // If parent is in parentIds, this could be a child or sub-issue
-            // We need to check if this issue itself has children
-            const isSubIssue = allAssignedIssues.some(otherIssue => 
-              otherIssue.parent && otherIssue.parent.id === issue.id
+        // Step 5: Separate child issues from sub-issues
+        issuesWithParents.forEach(issue => {
+          if (childIssueIds.has(issue.id)) {
+            // This is a child issue (it has children/sub-issues under it)
+            childIssues.set(issue.id, issue);
+          } else {
+            // This is a sub-issue
+            const parentId = issue.parent.id;
+            if (!subIssuesByChildId.has(parentId)) {
+              subIssuesByChildId.set(parentId, []);
+            }
+            subIssuesByChildId.get(parentId).push(issue);
+          }
+        });
+        
+        // Step 6: Also include child issues that don't have sub-issues
+        // These are issues that have a parent but are not parents themselves
+        issuesWithParents.forEach(issue => {
+          if (!childIssueIds.has(issue.id) && !childIssues.has(issue.id)) {
+            // This issue has a parent but doesn't have children
+            // It could be a standalone child issue or we need to check its parent
+            const parentIsInOurList = issuesWithParents.some(
+              otherIssue => otherIssue.id === issue.parent.id
             );
             
-            if (isSubIssue) {
-              // This is a child issue (ዝርዝር ተግባር)
+            if (!parentIsInOurList) {
+              // The parent is not in our assigned issues, so this is a child issue
               childIssues.set(issue.id, issue);
-            } else {
-              // This is a sub-issue (የግል እቅድ)
-              if (!subIssuesByChildId.has(issue.parent.id)) {
-                subIssuesByChildId.set(issue.parent.id, []);
-              }
-              subIssuesByChildId.get(issue.parent.id).push(issue);
             }
           }
         });
         
-        // Step 2: Fetch parent issues for the child issues
-        const parentIssuesList = [];
+        // Step 7: Organize child issues by their parent ID
         const childIssuesByParentId = new Map();
-        
-        // Organize child issues by their parent ID
         Array.from(childIssues.values()).forEach(child => {
           if (child.parent && child.parent.id) {
             if (!childIssuesByParentId.has(child.parent.id)) {
@@ -135,19 +295,49 @@ export default function AddSubIssue() {
           }
         });
         
-        // Fetch parent issues and attach their children
+        // Step 8: Fetch parent issues for the child issues
+        const parentIssuesList = [];
+        
         for (const parentId of Array.from(childIssuesByParentId.keys())) {
           try {
-            const parent = await getIssue(parentId);
+            const parent = await fetchIssueWithDetails(parentId);
             const children = childIssuesByParentId.get(parentId) || [];
+            
+            // Fetch assignee details for each child
+            const childrenWithDetails = await Promise.all(
+              children.map(async (child) => {
+                try {
+                  return await fetchIssueWithDetails(child.id);
+                } catch (error) {
+                  console.error(`Error fetching child issue ${child.id}:`, error);
+                  return child;
+                }
+              })
+            );
             
             parentIssuesList.push({
               ...parent,
-              children: children
+              children: childrenWithDetails
             });
           } catch (error) {
             console.error(`Error loading parent issue ${parentId}:`, error);
           }
+        }
+        
+        // Step 9: Fetch sub-issues with details
+        const subIssuesMapWithDetails = new Map();
+        for (const [childId, subIssues] of subIssuesByChildId.entries()) {
+          const subIssuesWithDetails = await Promise.all(
+            subIssues.map(async (subIssue) => {
+              try {
+                return await fetchIssueWithDetails(subIssue.id);
+              } catch (error) {
+                console.error(`Error fetching sub-issue ${subIssue.id}:`, error);
+                return subIssue;
+              }
+            })
+          );
+          subIssuesMapWithDetails.set(childId, subIssuesWithDetails);
         }
         
         // Sort parent issues by ID
@@ -156,7 +346,7 @@ export default function AddSubIssue() {
         // Update state
         setParentIssues(parentIssuesList);
         setChildIssuesMap(childIssuesByParentId);
-        setSubIssuesMap(subIssuesByChildId);
+        setSubIssuesMap(subIssuesMapWithDetails);
         
       } catch (error) {
         console.error("Error loading issue hierarchy:", error);
@@ -171,7 +361,7 @@ export default function AddSubIssue() {
   // Load parent issue data when parent is selected
   const loadParentData = async (issueId) => {
     try {
-      const issue = await getIssue(issueId);
+      const issue = await fetchIssueWithDetails(issueId);
       setParentIssue(issue);
       
       if (issue.tracker && issue.tracker.id) {
@@ -180,15 +370,45 @@ export default function AddSubIssue() {
       
       setStatuses(issue.allowed_statuses || []);
 
-      const filteredCustomFields = (issue.custom_fields || [])
-        .filter(cf => !excludedFields.includes(cf.name))
-        .map(cf => ({
-          id: cf.id,
-          name: cf.name,
-          value: ""
-        }));
+      // Get all custom fields from parent except excluded ones
+      const allCustomFields = issue.custom_fields || [];
+      
+      // Identify which quarter fields are mandatory for this parent
+      const mandatoryQuarterFields = getMandatoryQuarterFieldsForParent(issue);
+      console.log("Mandatory quarter fields for parent:", mandatoryQuarterFields);
+      
+      // Filter custom fields: exclude excludedFields, but include all fields in our fixed order
+      const filteredCustomFields = allCustomFields
+        .filter(cf => {
+          // Include if it's in our fixed order list
+          // OR if it's not in excluded fields
+          return (
+            fieldOrder.includes(cf.name) ||
+            !excludedFields.includes(cf.name)
+          );
+        })
+        .map(cf => {
+          const isMandatory = alwaysMandatoryFields.includes(cf.name) || mandatoryQuarterFields.includes(cf.name);
+          const showParentValue = cf.name === fieldWithParentValueHint;
+          
+          return {
+            id: cf.id,
+            name: cf.name,
+            value: isMandatory && showParentValue ? (cf.value || "") : "",
+            isMandatory: isMandatory,
+            originalValue: cf.value || "", // Store original value for reference
+            showParentValueHint: showParentValue
+          };
+        });
 
-      setCustomFields(filteredCustomFields);
+      // Sort fields according to the fixed order
+      const sortedCustomFields = sortCustomFieldsByFixedOrder(filteredCustomFields);
+
+      setCustomFields(sortedCustomFields);
+      
+      // Log for debugging
+      console.log("Loaded custom fields for create:", sortedCustomFields);
+      
     } catch (error) {
       console.error("Error loading parent data:", error);
     }
@@ -219,22 +439,46 @@ export default function AddSubIssue() {
     
     if (issue.parent && issue.parent.id) {
       try {
-        const parentIssueData = await getIssue(issue.parent.id);
+        const parentIssueData = await fetchIssueWithDetails(issue.parent.id);
         setParentIssue(parentIssueData);
         setStatuses(parentIssueData.allowed_statuses || []);
         
-        const parentCustomFields = (parentIssueData.custom_fields || [])
-          .filter(cf => !excludedFields.includes(cf.name));
+        // Get mandatory quarter fields for parent
+        const mandatoryQuarterFields = getMandatoryQuarterFieldsForParent(parentIssueData);
         
+        const parentCustomFields = parentIssueData.custom_fields || [];
         const issueCustomFields = issue.custom_fields || [];
         
-        const mappedCustomFields = parentCustomFields.map(cf => ({
-          id: cf.id,
-          name: cf.name,
-          value: issueCustomFields.find(f => f.id === cf.id)?.value || ""
-        }));
+        // Map custom fields, marking mandatory ones
+        const mappedCustomFields = parentCustomFields
+          .filter(cf => {
+            return (
+              fieldOrder.includes(cf.name) ||
+              !excludedFields.includes(cf.name)
+            );
+          })
+          .map(cf => {
+            const issueField = issueCustomFields.find(f => f.id === cf.id);
+            const isMandatory = alwaysMandatoryFields.includes(cf.name) || mandatoryQuarterFields.includes(cf.name);
+            const showParentValue = cf.name === fieldWithParentValueHint;
+            
+            // For መለኪያ field, use the parent value as initial value if issue doesn't have one
+            const value = issueField?.value || (isMandatory && showParentValue ? (cf.value || "") : "");
+            
+            return {
+              id: cf.id,
+              name: cf.name,
+              value: value,
+              isMandatory: isMandatory,
+              originalValue: cf.value || "",
+              showParentValueHint: showParentValue
+            };
+          });
         
-        setEditCustomFields(mappedCustomFields);
+        // Sort fields according to the fixed order
+        const sortedCustomFields = sortCustomFieldsByFixedOrder(mappedCustomFields);
+        
+        setEditCustomFields(sortedCustomFields);
         
       } catch (error) {
         console.error("Error loading parent data for edit:", error);
@@ -244,9 +488,53 @@ export default function AddSubIssue() {
     setShowEditModal(true);
   };
 
+  // Validation function for create form
+  const validateCreateForm = () => {
+    if (!parentId) {
+      alert("Select a parent issue.");
+      return false;
+    }
+    
+    if (!subject.trim()) {
+      alert("Subject is required.");
+      return false;
+    }
+    
+    // Check mandatory fields
+    const missingMandatoryFields = customFields
+      .filter(cf => cf.isMandatory && (!cf.value || cf.value.trim() === ""))
+      .map(cf => cf.name);
+    
+    if (missingMandatoryFields.length > 0) {
+      alert(`The following mandatory fields are required:\n${missingMandatoryFields.join("\n")}`);
+      return false;
+    }
+    
+    return true;
+  };
+
+  // Validation function for edit form
+  const validateEditForm = () => {
+    if (!editFormData.subject.trim()) {
+      alert("Subject is required.");
+      return false;
+    }
+    
+    // Check mandatory fields
+    const missingMandatoryFields = editCustomFields
+      .filter(cf => cf.isMandatory && (!cf.value || cf.value.trim() === ""))
+      .map(cf => cf.name);
+    
+    if (missingMandatoryFields.length > 0) {
+      alert(`The following mandatory fields are required:\n${missingMandatoryFields.join("\n")}`);
+      return false;
+    }
+    
+    return true;
+  };
+
   const handleSubmit = async () => {
-    if (!parentId) return alert("Select a parent issue.");
-    if (!subject.trim()) return alert("Subject is required.");
+    if (!validateCreateForm()) return;
 
     const payload = {
       project_id: parentIssue.project.id,
@@ -276,6 +564,8 @@ export default function AddSubIssue() {
 
   const handleEditSubmit = async () => {
     if (!editingIssue) return;
+    
+    if (!validateEditForm()) return;
 
     const payload = {
       ...editFormData,
@@ -330,34 +620,65 @@ export default function AddSubIssue() {
       const parentIds = new Set();
       const subIssuesByChildId = new Map();
       
-      // First pass: Identify child issues and collect parent IDs
-      allAssignedIssues.forEach(issue => {
-        if (issue.parent && issue.parent.id) {
-          parentIds.add(issue.parent.id);
+      // Step 1: Identify ALL issues with parents
+      const issuesWithParents = allAssignedIssues.filter(issue => 
+        issue.parent && issue.parent.id
+      );
+      
+      // Step 2: Create a map of parent-child relationships
+      const parentChildMap = new Map();
+      
+      // Build the parent-child relationships
+      issuesWithParents.forEach(issue => {
+        const parentId = issue.parent.id;
+        if (!parentChildMap.has(parentId)) {
+          parentChildMap.set(parentId, []);
+        }
+        parentChildMap.get(parentId).push(issue);
+      });
+      
+      // Step 3: Identify which parent IDs are also child issues
+      const childIssueIds = new Set();
+      issuesWithParents.forEach(issue => {
+        // If this issue's parent ID is in our issues list, then the parent is a child issue
+        if (issuesWithParents.some(parentIssue => parentIssue.id === issue.parent.id)) {
+          childIssueIds.add(issue.parent.id);
         }
       });
       
-      // Second pass: Separate child issues from sub-issues
-      allAssignedIssues.forEach(issue => {
-        if (issue.parent && issue.parent.id) {
-          const isSubIssue = allAssignedIssues.some(otherIssue => 
-            otherIssue.parent && otherIssue.parent.id === issue.id
+      // Step 4: Separate child issues from sub-issues
+      issuesWithParents.forEach(issue => {
+        if (childIssueIds.has(issue.id)) {
+          // This is a child issue (it has children/sub-issues under it)
+          childIssues.set(issue.id, issue);
+        } else {
+          // This is a sub-issue
+          const parentId = issue.parent.id;
+          if (!subIssuesByChildId.has(parentId)) {
+            subIssuesByChildId.set(parentId, []);
+          }
+          subIssuesByChildId.get(parentId).push(issue);
+        }
+      });
+      
+      // Step 5: Also include child issues that don't have sub-issues
+      // These are issues that have a parent but are not parents themselves
+      issuesWithParents.forEach(issue => {
+        if (!childIssueIds.has(issue.id) && !childIssues.has(issue.id)) {
+          // This issue has a parent but doesn't have children
+          // It could be a standalone child issue or we need to check its parent
+          const parentIsInOurList = issuesWithParents.some(
+            otherIssue => otherIssue.id === issue.parent.id
           );
           
-          if (isSubIssue) {
-            // This is a child issue
+          if (!parentIsInOurList) {
+            // The parent is not in our assigned issues, so this is a child issue
             childIssues.set(issue.id, issue);
-          } else {
-            // This is a sub-issue
-            if (!subIssuesByChildId.has(issue.parent.id)) {
-              subIssuesByChildId.set(issue.parent.id, []);
-            }
-            subIssuesByChildId.get(issue.parent.id).push(issue);
           }
         }
       });
       
-      // Organize child issues by their parent ID
+      // Step 6: Organize child issues by their parent ID
       const parentIssuesList = [];
       const childIssuesByParentId = new Map();
       
@@ -370,26 +691,54 @@ export default function AddSubIssue() {
         }
       });
       
-      // Fetch parent issues and attach their children
+      // Step 7: Fetch parent issues and attach their children
       for (const parentId of Array.from(childIssuesByParentId.keys())) {
         try {
-          const parent = await getIssue(parentId);
+          const parent = await fetchIssueWithDetails(parentId);
           const children = childIssuesByParentId.get(parentId) || [];
+          
+          // Fetch assignee details for each child
+          const childrenWithDetails = await Promise.all(
+            children.map(async (child) => {
+              try {
+                return await fetchIssueWithDetails(child.id);
+              } catch (error) {
+                console.error(`Error fetching child issue ${child.id}:`, error);
+                return child;
+              }
+            })
+          );
           
           parentIssuesList.push({
             ...parent,
-            children: children
+            children: childrenWithDetails
           });
         } catch (error) {
           console.error(`Error loading parent issue ${parentId}:`, error);
         }
       }
       
+      // Step 8: Fetch sub-issues with details
+      const subIssuesMapWithDetails = new Map();
+      for (const [childId, subIssues] of subIssuesByChildId.entries()) {
+        const subIssuesWithDetails = await Promise.all(
+          subIssues.map(async (subIssue) => {
+            try {
+              return await fetchIssueWithDetails(subIssue.id);
+            } catch (error) {
+              console.error(`Error fetching sub-issue ${subIssue.id}:`, error);
+              return subIssue;
+            }
+          })
+        );
+        subIssuesMapWithDetails.set(childId, subIssuesWithDetails);
+      }
+      
       parentIssuesList.sort((a, b) => (a.id || 0) - (b.id || 0));
       
       setParentIssues(parentIssuesList);
       setChildIssuesMap(childIssuesByParentId);
-      setSubIssuesMap(subIssuesByChildId);
+      setSubIssuesMap(subIssuesMapWithDetails);
       
     } catch (error) {
       console.error("Error refreshing data:", error);
@@ -418,6 +767,49 @@ export default function AddSubIssue() {
     } catch (error) {
       return "Invalid Date";
     }
+  };
+
+  // Helper function to check if a child issue has sub-issues assigned to current user
+  const hasSubIssuesAssignedToMe = (childId) => {
+    if (!subIssuesMap.has(childId)) return false;
+    
+    const subIssues = subIssuesMap.get(childId);
+    // Check if any sub-issue is assigned to the current user
+    return subIssues.some(subIssue => 
+      subIssue.assigned_to && subIssue.assigned_to.id === currentUser?.id
+    );
+  };
+
+  // Filter handler
+  const handleFilterChange = (value) => {
+    setFilterType(value);
+  };
+
+  // Get filtered parent issues based on filter type
+  const getFilteredParentIssues = () => {
+    if (filterType === "all" || !currentUser) {
+      return parentIssues;
+    }
+    
+    if (filterType === "childWithoutSubIssues") {
+      return parentIssues.map(parent => {
+        // Filter children to show only those without sub-issues assigned to current user
+        const filteredChildren = (parent.children || []).filter(child => 
+          !hasSubIssuesAssignedToMe(child.id)
+        );
+        
+        // Only return parent if it has filtered children
+        if (filteredChildren.length > 0) {
+          return {
+            ...parent,
+            children: filteredChildren
+          };
+        }
+        return null;
+      }).filter(parent => parent !== null); // Remove parents with no filtered children
+    }
+    
+    return parentIssues;
   };
 
   // CSS for loading spinner
@@ -468,10 +860,71 @@ export default function AddSubIssue() {
     );
   }
 
+  const filteredParentIssues = getFilteredParentIssues();
+
   return (
-    <div style={{ padding: "20px", maxWidth: "1200px", margin: "0 auto" }}>
+    <div style={{ padding: "20px", maxWidth: "1400px", margin: "0 auto" }}>
       <style>{spinnerCSS}</style>
-      <h1 style={{ color: "#2e7d32", marginBottom: "20px" }}>Add የግል እቅድ</h1>
+      
+      
+      
+      {/* Filter Section */}
+      <div style={{ 
+        marginBottom: "20px",
+        padding: "15px 20px",
+        background: "white",
+        borderRadius: "8px",
+        boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between"
+      }}>
+        <div>
+          <h3 style={{ 
+            color: "#2e7d32", 
+            margin: "0",
+            fontSize: "16px"
+          }}>
+            Issue Filter
+          </h3>
+          <p style={{ 
+            color: "#666", 
+            fontSize: "13px",
+            margin: "5px 0 0 0"
+          }}>
+            Filter the issues displayed below
+          </p>
+        </div>
+        
+        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+          <label style={{
+            fontSize: "14px",
+            color: "#2e7d32",
+            fontWeight: "600"
+          }}>
+            Show:
+          </label>
+          <select
+            value={filterType}
+            onChange={(e) => handleFilterChange(e.target.value)}
+            style={{
+              padding: "10px 15px",
+              border: "1px solid #c8e6c9",
+              borderRadius: "6px",
+              fontSize: "14px",
+              background: "white",
+              color: "#2e7d32",
+              fontWeight: "500",
+              minWidth: "280px",
+              cursor: "pointer",
+              outline: "none"
+            }}
+          >
+            <option value="all">All (ሁሉም ተግባሮች)</option>
+            <option value="childWithoutSubIssues">ዝርዝር ተግባር (የግል እቅድ የሌላቸው)</option>
+          </select>
+        </div>
+      </div>
       
       <div style={{ 
         marginBottom: "30px",
@@ -507,7 +960,7 @@ export default function AddSubIssue() {
               Please wait while we fetch your assigned tasks
             </p>
           </div>
-        ) : parentIssues.length === 0 ? (
+        ) : filteredParentIssues.length === 0 ? (
           <div style={{ 
             textAlign: "center", 
             padding: "40px 20px",
@@ -518,7 +971,7 @@ export default function AddSubIssue() {
               width: "80px",
               height: "80px",
               margin: "0 auto 20px",
-              background: "#e8f5e9",
+              background: filterType === "childWithoutSubIssues" ? "#fff3e0" : "#e8f5e9",
               borderRadius: "50%",
               display: "flex",
               alignItems: "center",
@@ -526,16 +979,18 @@ export default function AddSubIssue() {
             }}>
               <span style={{ 
                 fontSize: "40px", 
-                color: "#4caf50" 
+                color: filterType === "childWithoutSubIssues" ? "#ff9800" : "#4caf50"
               }}>
-                📋
+                {filterType === "childWithoutSubIssues" ? "✅" : "📋"}
               </span>
             </div>
             <h3 style={{ 
-              color: "#2e7d32", 
+              color: filterType === "childWithoutSubIssues" ? "#e65100" : "#2e7d32", 
               marginBottom: "10px" 
             }}>
-              No ዝርዝር ተግባር Assigned
+              {filterType === "childWithoutSubIssues" 
+                ? "ሁሉም ዝርዝር ተግባሮች የግል እቅድ አላቸው" 
+                : "No ዝርዝር ተግባር Assigned"}
             </h3>
             <p style={{ 
               color: "#666", 
@@ -543,7 +998,9 @@ export default function AddSubIssue() {
               maxWidth: "400px",
               margin: "0 auto"
             }}>
-              You don't have any ዝርዝር ተግባር (detailed tasks) assigned to you at the moment.
+              {filterType === "childWithoutSubIssues" 
+                ? "All your ዝርዝር ተግባሮች (detailed tasks) already have የግል እቅድ assigned to you." 
+                : "You don't have any ዝርዝር ተግባር (detailed tasks) assigned to you at the moment."}
             </p>
           </div>
         ) : (
@@ -556,54 +1013,105 @@ export default function AddSubIssue() {
               <thead>
                 <tr style={{ background: "#f1f8e9" }}>
                   <th style={{ padding: "12px", textAlign: "left", borderBottom: "2px solid #c8e6c9", width: "15%" }}>Type</th>
-                  <th style={{ padding: "12px", textAlign: "left", borderBottom: "2px solid #c8e6c9", width: "45%" }}>Subject</th>
-                  <th style={{ padding: "12px", textAlign: "left", borderBottom: "2px solid #c8e6c9", width: "15%" }}>Start Date</th>
-                  <th style={{ padding: "12px", textAlign: "left", borderBottom: "2px solid #c8e6c9", width: "15%" }}>Due Date</th>
+                  <th style={{ padding: "12px", textAlign: "left", borderBottom: "2px solid #c8e6c9", width: "30%" }}>Subject</th>
+                  <th style={{ padding: "12px", textAlign: "left", borderBottom: "2px solid #c8e6c9", width: "10%" }}>Assignee</th>
+                  <th style={{ padding: "12px", textAlign: "left", borderBottom: "2px solid #c8e6c9", width: "5%" }}>ክብደት</th>
+                  <th style={{ padding: "12px", textAlign: "left", borderBottom: "2px solid #c8e6c9", width: "8%" }}>የዓመቱ እቅድ</th>
+                  <th style={{ padding: "12px", textAlign: "left", borderBottom: "2px solid #c8e6c9", width: "8%" }}>1ኛ ሩብዓመት</th>
+                  <th style={{ padding: "12px", textAlign: "left", borderBottom: "2px solid #c8e6c9", width: "8%" }}>2ኛ ሩብዓመት</th>
+                  <th style={{ padding: "12px", textAlign: "left", borderBottom: "2px solid #c8e6c9", width: "8%" }}>3ኛ ሩብዓመት</th>
+                  <th style={{ padding: "12px", textAlign: "left", borderBottom: "2px solid #c8e6c9", width: "8%" }}>4ኛ ሩብዓመት</th>
                   <th style={{ padding: "12px", textAlign: "left", borderBottom: "2px solid #c8e6c9", width: "10%" }}>Action</th>
                 </tr>
               </thead>
               <tbody>
-                {parentIssues.map(parent => (
+                {filteredParentIssues.map(parent => (
                   <React.Fragment key={parent.id}>
                     {/* Parent Issue Row (ዋና ተግባር) */}
                     <tr style={{ 
                       background: "#e8f5e9",
-                      borderBottom: "2px solid #c8e6c9"
+                      borderBottom: "2px solid #c8e6c9",
+                      
                     }}>
-                      <td style={{ padding: "12px" }}>
+                      <td style={{ padding: "12px",
+                        
+                       }}>
                         ዋና ተግባር
                       </td>
-                      <td style={{ padding: "12px", fontWeight: "bold" }}>
+                      <td style={{ padding: "12px", fontWeight: "bold"}}>
                         #{parent.id} - {parent.subject}
                       </td>
-                      <td style={{ padding: "12px" }}>{formatDate(parent.start_date)}</td>
-                      <td style={{ padding: "12px" }}>{formatDate(parent.due_date)}</td>
-                      <td style={{ padding: "12px" }}>
-                        {/* Empty cell for parent rows - no button */}
+                      {/* Single merged cell for all other columns */}
+                      <td colSpan="8" style={{ 
+                        padding: "12px", 
+                        background: "#e8f5e9",
+                        textAlign: "center",
+                        color: "#666",
+                        fontStyle: "italic"
+                      }}>
+                        {/* Empty or custom text */}
                       </td>
+                     
                     </tr>
                     
                     {/* Child Issues (ዝርዝር ተግባር) */}
                     {parent.children && parent.children.map(child => (
                       <React.Fragment key={child.id}>
+                        {/* Always show child issues (they're already filtered) */}
                         <tr style={{ 
-                          background: "#f9f9f9",
-                          borderLeft: "4px solid #81c784"
+                          background: filterType === "childWithoutSubIssues" ? "#fff3e0" : "#f9f9f9",
+                          borderLeft: filterType === "childWithoutSubIssues" ? "4px solid #ffb74d" : "4px solid #81c784"
                         }}>
                           <td style={{ padding: "12px", paddingLeft: "30px" }}>
                             ዝርዝር ተግባር
                           </td>
                           <td style={{ padding: "12px", paddingLeft: "30px" }}>
                             #{child.id} - {child.subject}
+                            {filterType === "childWithoutSubIssues" && hasSubIssuesAssignedToMe(child.id) && (
+                              <span style={{
+                                marginLeft: "10px",
+                                fontSize: "11px",
+                                background: "#ff9800",
+                                color: "white",
+                                padding: "2px 6px",
+                                borderRadius: "10px",
+                                fontWeight: "bold"
+                              }}>
+                                Has የግል እቅድ
+                              </span>
+                            )}
                           </td>
-                          <td style={{ padding: "12px" }}>{formatDate(child.start_date)}</td>
-                          <td style={{ padding: "12px" }}>{formatDate(child.due_date)}</td>
+                          {/* Assignee column */}
+                          <td style={{ padding: "12px" }}>
+                            {getAssigneeName(child)}
+                          </td>
+                          {/* ክብደት column */}
+                          <td style={{ padding: "12px", textAlign: "center" }}>
+                            {getCustomFieldValue(child, "ክብደት") || "-"}
+                          </td>
+                          {/* የዓመቱ እቅድ column */}
+                          <td style={{ padding: "12px", textAlign: "center" }}>
+                            {getCustomFieldValue(child, "የዓመቱ እቅድ") || "-"}
+                          </td>
+                          {/* Quarter columns */}
+                          <td style={{ padding: "12px", textAlign: "center" }}>
+                            {getCustomFieldValue(child, "1ኛ ሩብዓመት") || "-"}
+                          </td>
+                          <td style={{ padding: "12px", textAlign: "center" }}>
+                            {getCustomFieldValue(child, "2ኛ ሩብዓመት") || "-"}
+                          </td>
+                          <td style={{ padding: "12px", textAlign: "center" }}>
+                            {getCustomFieldValue(child, "3ኛ ሩብዓመት") || "-"}
+                          </td>
+                          <td style={{ padding: "12px", textAlign: "center" }}>
+                            {getCustomFieldValue(child, "4ኛ ሩብዓመት") || "-"}
+                          </td>
                           <td style={{ padding: "12px" }}>
                             <button
                               onClick={() => handleCreateClick(child.id)}
                               style={{
                                 padding: "8px 15px",
-                                background: "#4caf50",
+                                background: filterType === "childWithoutSubIssues" ? "#ff9800" : "#4caf50",
                                 color: "white",
                                 border: "none",
                                 borderRadius: "4px",
@@ -614,10 +1122,10 @@ export default function AddSubIssue() {
                                 transition: "all 0.3s ease"
                               }}
                               onMouseEnter={(e) => {
-                                e.target.style.background = "#388e3c";
+                                e.target.style.background = filterType === "childWithoutSubIssues" ? "#f57c00" : "#388e3c";
                               }}
                               onMouseLeave={(e) => {
-                                e.target.style.background = "#4caf50";
+                                e.target.style.background = filterType === "childWithoutSubIssues" ? "#ff9800" : "#4caf50";
                               }}
                             >
                               Add የግል እቅድ
@@ -625,8 +1133,8 @@ export default function AddSubIssue() {
                           </td>
                         </tr>
                         
-                        {/* Sub-Issues (የግል እቅድ) */}
-                        {subIssuesMap.has(child.id) && (
+                        {/* Sub-Issues (የግል እቅድ) - Only show when filter is "all" */}
+                        {filterType === "all" && subIssuesMap.has(child.id) && (
                           subIssuesMap.get(child.id).map(subIssue => (
                             <tr key={subIssue.id} style={{ 
                               background: "#f1f8e9",
@@ -638,8 +1146,31 @@ export default function AddSubIssue() {
                               <td style={{ padding: "12px", paddingLeft: "50px" }}>
                                 #{subIssue.id} - {subIssue.subject}
                               </td>
-                              <td style={{ padding: "12px" }}>{formatDate(subIssue.start_date)}</td>
-                              <td style={{ padding: "12px" }}>{formatDate(subIssue.due_date)}</td>
+                              {/* Assignee column for sub-issue */}
+                              <td style={{ padding: "12px" }}>
+                                {getAssigneeName(subIssue)}
+                              </td>
+                              {/* ክብደት column for sub-issue */}
+                              <td style={{ padding: "12px", textAlign: "center" }}>
+                                {getCustomFieldValue(subIssue, "ክብደት") || "-"}
+                              </td>
+                              {/* የዓመቱ እቅድ column for sub-issue */}
+                              <td style={{ padding: "12px", textAlign: "center" }}>
+                                {getCustomFieldValue(subIssue, "የዓመቱ እቅድ") || "-"}
+                              </td>
+                              {/* Quarter columns for sub-issue */}
+                              <td style={{ padding: "12px", textAlign: "center" }}>
+                                {getCustomFieldValue(subIssue, "1ኛ ሩብዓመት") || "-"}
+                              </td>
+                              <td style={{ padding: "12px", textAlign: "center" }}>
+                                {getCustomFieldValue(subIssue, "2ኛ ሩብዓመት") || "-"}
+                              </td>
+                              <td style={{ padding: "12px", textAlign: "center" }}>
+                                {getCustomFieldValue(subIssue, "3ኛ ሩብዓመት") || "-"}
+                              </td>
+                              <td style={{ padding: "12px", textAlign: "center" }}>
+                                {getCustomFieldValue(subIssue, "4ኛ ሩብዓመት") || "-"}
+                              </td>
                               <td style={{ padding: "12px" }}>
                                 <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                                   <button
@@ -1039,6 +1570,14 @@ export default function AddSubIssue() {
                     paddingBottom: "5px" 
                   }}>
                     Additional Fields
+                    <span style={{ 
+                      fontSize: "12px", 
+                      color: "#e65100", 
+                      marginLeft: "10px", 
+                      fontWeight: "normal" 
+                    }}>
+                      * Required fields
+                    </span>
                   </h3>
                   {customFields.map((cf, idx) => (
                     <div key={cf.id} style={{ marginBottom: "15px" }}>
@@ -1046,10 +1585,24 @@ export default function AddSubIssue() {
                         display: "block",
                         marginBottom: "8px",
                         fontWeight: "600",
-                        color: "#2e7d32",
+                        color: cf.isMandatory ? "#e65100" : "#2e7d32",
                         fontSize: "14px"
                       }}>
                         {cf.name}
+                        {cf.isMandatory && (
+                          <span style={{ color: "#e65100", marginLeft: "5px" }}>*</span>
+                        )}
+                        {/* Only show parent value hint for መለኪያ field */}
+                        {cf.showParentValueHint && cf.originalValue && cf.originalValue !== "" && (
+                          <span style={{
+                            fontSize: "12px",
+                            color: "#666",
+                            marginLeft: "10px",
+                            fontStyle: "italic"
+                          }}>
+                            (Parent value: {cf.originalValue})
+                          </span>
+                        )}
                       </label>
                       <input
                         type="text"
@@ -1062,12 +1615,14 @@ export default function AddSubIssue() {
                         style={{
                           width: "100%",
                           padding: "12px",
-                          border: "1px solid #c8e6c9",
+                          border: `1px solid ${cf.isMandatory ? "#ffcc80" : "#c8e6c9"}`,
                           borderRadius: "4px",
                           fontSize: "14px",
-                          boxSizing: "border-box"
+                          boxSizing: "border-box",
+                          background: cf.isMandatory && (!cf.value || cf.value === "") ? "#fff3e0" : "white"
                         }}
                         placeholder={`Enter ${cf.name.toLowerCase()}...`}
+                        required={cf.isMandatory}
                       />
                     </div>
                   ))}
@@ -1447,6 +2002,14 @@ export default function AddSubIssue() {
                     paddingBottom: "5px" 
                   }}>
                     Additional Fields
+                    <span style={{ 
+                      fontSize: "12px", 
+                      color: "#e65100", 
+                      marginLeft: "10px", 
+                      fontWeight: "normal" 
+                    }}>
+                      * Required fields
+                    </span>
                   </h3>
                   {editCustomFields.map((cf, idx) => (
                     <div key={cf.id} style={{ marginBottom: "15px" }}>
@@ -1454,10 +2017,24 @@ export default function AddSubIssue() {
                         display: "block",
                         marginBottom: "8px",
                         fontWeight: "600",
-                        color: "#2e7d32",
+                        color: cf.isMandatory ? "#e65100" : "#2e7d32",
                         fontSize: "14px"
                       }}>
                         {cf.name}
+                        {cf.isMandatory && (
+                          <span style={{ color: "#e65100", marginLeft: "5px" }}>*</span>
+                        )}
+                        {/* Only show parent value hint for መለኪያ field */}
+                        {cf.showParentValueHint && cf.originalValue && cf.originalValue !== "" && (
+                          <span style={{
+                            fontSize: "12px",
+                            color: "#666",
+                            marginLeft: "10px",
+                            fontStyle: "italic"
+                          }}>
+                            (Parent value: {cf.originalValue})
+                          </span>
+                        )}
                       </label>
                       <input
                         type="text"
@@ -1470,12 +2047,14 @@ export default function AddSubIssue() {
                         style={{
                           width: "100%",
                           padding: "12px",
-                          border: "1px solid #c8e6c9",
+                          border: `1px solid ${cf.isMandatory ? "#ffcc80" : "#c8e6c9"}`,
                           borderRadius: "4px",
                           fontSize: "14px",
-                          boxSizing: "border-box"
+                          boxSizing: "border-box",
+                          background: cf.isMandatory && (!cf.value || cf.value === "") ? "#fff3e0" : "white"
                         }}
                         placeholder={`Enter ${cf.name.toLowerCase()}...`}
+                        required={cf.isMandatory}
                       />
                     </div>
                   ))}
