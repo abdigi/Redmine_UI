@@ -50,25 +50,7 @@ export default function Header() {
     return `${user.firstname} ${user.lastname}`;
   };
 
-  const getUserRole = () => {
-    if (!user || !user.memberships) return "Ministry Staff";
-    
-    const roles = new Set();
-    user.memberships.forEach((membership) => {
-      membership.roles.forEach((role) => roles.add(role.name));
-    });
-
-    const roleArray = Array.from(roles);
-    if (roleArray.length > 0) {
-      if (roleArray.includes("State Ministers")) return "State Minister";
-      if (roleArray.includes("Chief Executives")) return "Chief Executive";
-      if (roleArray.includes("Executives")) return "Executive";
-      if (roleArray.includes("Team Leaders")) return "Team Leader";
-      return roleArray[0];
-    }
-    
-    return "Ministry Staff";
-  };
+ 
 
   return (
     <header className="header-container">
@@ -101,7 +83,7 @@ export default function Header() {
             </div>
             <div className="user-details-static">
               <span className="user-name-static">{getUserFullName()}</span>
-              <span className="user-role-static">{getUserRole()}</span>
+              
             </div>
           </div>
         )}
