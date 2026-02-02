@@ -72,197 +72,154 @@ const countValidQuarters = (issue) => {
   return getValidQuartersList(issue).length;
 };
 
-const getQuarterRanges = (validQuartersList, targetQuarter) => {
-  const validQuartersCount = validQuartersList.length;
-  const targetQuarterIndex = getQuarterIndex(targetQuarter);
+// ============================
+// ACHIEVEMENT FUNCTIONS - NEW
+// ============================
+const getQuarterAchievement = (issue, quarter) => {
+  const achievementFieldMap = {
+    "1ኛ ሩብዓመት": "1ኛ ሩብዓመት_አፈጻጸም",
+    "2ኛ ሩብዓመት": "2ኛ ሩብዓመት_አፈጻጸም",
+    "3ኛ ሩብዓመት": "3ኛ ሩብዓመት_አፈጻጸም",
+    "4ኛ ሩብዓመት": "4ኛ ሩብዓመት_አፈጻጸም"
+  };
   
-  if (validQuartersCount === 4) {
-    const ranges = [
-      { start: 0, end: 25 },
-      { start: 25, end: 50 },
-      { start: 50, end: 75 },
-      { start: 75, end: 100 }
-    ];
-    return ranges[targetQuarterIndex - 1] || { start: 0, end: 100 };
+  const achievementFieldName = achievementFieldMap[quarter];
+  if (!achievementFieldName) return 0;
+  
+  const achievementValue = getField(issue, achievementFieldName);
+  if (!achievementValue || achievementValue === "0" || achievementValue === "") {
+    return 0;
   }
   
-  if (validQuartersCount === 3) {
-    const ranges = [];
-    let currentStart = 0;
-    const segmentSize = 100 / validQuartersCount;
-    
-    validQuartersList.forEach((quarter, index) => {
-      const qIdx = getQuarterIndex(quarter);
-      ranges[qIdx - 1] = {
-        start: currentStart,
-        end: currentStart + segmentSize
-      };
-      currentStart += segmentSize;
-    });
-    
-    return ranges[targetQuarterIndex - 1] || { start: 0, end: 100 };
-  }
-  
-  if (validQuartersCount === 2) {
-    const ranges = {};
-    const segmentSize = 100 / validQuartersCount;
-    let currentStart = 0;
-    
-    validQuartersList.forEach((quarter, index) => {
-      const qIdx = getQuarterIndex(quarter);
-      ranges[qIdx] = {
-        start: currentStart,
-        end: currentStart + segmentSize
-      };
-      currentStart += segmentSize;
-    });
-    
-    return ranges[targetQuarterIndex] || { start: 0, end: 100 };
-  }
-  
-  if (validQuartersCount === 1) {
-    return { start: 0, end: 100 };
-  }
-  
-  return { start: 0, end: 100 };
+  const numValue = parseFloat(achievementValue.toString().trim());
+  return isNaN(numValue) ? 0 : numValue;
 };
 
-const mapSubIssueProgress = (donePercent, period, subIssue = null) => {
-  if (!donePercent) donePercent = 0;
+const getTotalYearlyAchievement = (issue) => {
+  const quarters = ["1ኛ ሩብዓመት", "2ኛ ሩብዓመት", "3ኛ ሩብዓመት", "4ኛ ሩብዓመት"];
+  let total = 0;
   
-  if (period === "Yearly") return donePercent;
+  quarters.forEach(quarter => {
+    total += getQuarterAchievement(issue, quarter);
+  });
   
-  if (period === "6 Months") {
-    return donePercent <= 50 ? Math.round((donePercent / 50) * 100) : 100;
-  }
-  
-  if (period === "9 Months") {
-    return donePercent <= 75 ? Math.round((donePercent / 75) * 100) : 100;
-  }
-
-  if (period.includes("ሩብዓመት")) {
-    const quarterIndex = getQuarterIndex(period);
-    
-    if (!subIssue) {
-      switch (quarterIndex) {
-        case 1:
-          return donePercent <= 25 ? Math.round((donePercent / 25) * 100) : 100;
-        case 2:
-          return donePercent >= 26 && donePercent <= 50
-            ? Math.round(((donePercent - 26) / 24) * 100)
-            : donePercent > 50
-            ? 100
-            : 0;
-        case 3:
-          return donePercent >= 51 && donePercent <= 75
-            ? Math.round(((donePercent - 51) / 24) * 100)
-            : donePercent > 75
-            ? 100
-            : 0;
-        case 4:
-          return donePercent >= 76 && donePercent <= 100
-            ? Math.round(((donePercent - 76) / 24) * 100)
-            : donePercent === 100
-            ? 100
-            : 0;
-        default:
-          return donePercent;
-      }
-    }
-    
-    const validQuartersList = getValidQuartersList(subIssue);
-    
-    if (!validQuartersList.includes(period)) {
-      return 0;
-    }
-    
-    const quarterRange = getQuarterRanges(validQuartersList, period);
-    
-    const { start, end } = quarterRange;
-    const rangeSize = end - start;
-    
-    if (rangeSize <= 0) {
-      return 0;
-    }
-    
-    const actualProgressInYear = donePercent;
-    
-    if (actualProgressInYear < start) {
-      return 0;
-    } else if (actualProgressInYear >= end) {
-      return 100;
-    } else {
-      const progressInQuarter = actualProgressInYear - start;
-      const mappedPercent = Math.round((progressInQuarter / rangeSize) * 100);
-      return Math.min(100, Math.max(0, mappedPercent));
-    }
-  }
-  
-  return donePercent;
+  return total;
 };
 
+// ============================
+// NEW PROGRESS CALCULATION FUNCTIONS
+// ============================
+const calculateQuarterProgress = (issue, quarter) => {
+  // Get quarter target
+  const quarterTargetValue = getField(issue, quarter);
+  if (!quarterTargetValue || quarterTargetValue === "0" || quarterTargetValue === "") {
+    return 0;
+  }
+  
+  const targetNum = parseFloat(quarterTargetValue.toString().trim());
+  if (isNaN(targetNum) || targetNum === 0) {
+    return 0;
+  }
+  
+  // Get quarter achievement
+  const achievement = getQuarterAchievement(issue, quarter);
+  
+  // Calculate progress: (achievement * 100) / target
+  const progress = (achievement / targetNum) * 100;
+  
+  // Return rounded value, capped at 100
+  
+  return Math.min(100, Math.round(progress * 100) / 100);
+};
+
+const calculateYearlyProgress = (issue) => {
+  // Get yearly target
+  const yearlyTargetValue = getField(issue, "የዓመቱ እቅድ");
+  if (!yearlyTargetValue || yearlyTargetValue === "0" || yearlyTargetValue === "") {
+    return 0;
+  }
+  
+  const yearlyTarget = parseFloat(yearlyTargetValue.toString().trim());
+  if (isNaN(yearlyTarget) || yearlyTarget === 0) {
+    return 0;
+  }
+  
+  // Get total achievement (sum of all quarter achievements)
+  const totalAchievement = getTotalYearlyAchievement(issue);
+  
+  // Calculate progress: (total achievement * 100) / yearly target
+  const progress = (totalAchievement / yearlyTarget) * 100;
+  
+  // Return rounded value, capped at 100
+  return Math.min(100, Math.round(progress * 100) / 100);
+};
+
+const calculateSixMonthsProgress = (issue) => {
+  // For 6 months: Q1 + Q2
+  const q1Target = parseFloat((getField(issue, "1ኛ ሩብዓመት") || "0").toString().trim()) || 0;
+  const q2Target = parseFloat((getField(issue, "2ኛ ሩብዓመት") || "0").toString().trim()) || 0;
+  const totalTarget = q1Target + q2Target;
+  
+  if (totalTarget === 0) return 0;
+  
+  const q1Achievement = getQuarterAchievement(issue, "1ኛ ሩብዓመት");
+  const q2Achievement = getQuarterAchievement(issue, "2ኛ ሩብዓመት");
+  const totalAchievement = q1Achievement + q2Achievement;
+  
+  const progress = (totalAchievement / totalTarget) * 100;
+  return Math.min(100, Math.round(progress * 100) / 100);
+};
+
+const calculateNineMonthsProgress = (issue) => {
+  // For 9 months: Q1 + Q2 + Q3
+  const q1Target = parseFloat((getField(issue, "1ኛ ሩብዓመት") || "0").toString().trim()) || 0;
+  const q2Target = parseFloat((getField(issue, "2ኛ ሩብዓመት") || "0").toString().trim()) || 0;
+  const q3Target = parseFloat((getField(issue, "3ኛ ሩብዓመት") || "0").toString().trim()) || 0;
+  const totalTarget = q1Target + q2Target + q3Target;
+  
+  if (totalTarget === 0) return 0;
+  
+  const q1Achievement = getQuarterAchievement(issue, "1ኛ ሩብዓመት");
+  const q2Achievement = getQuarterAchievement(issue, "2ኛ ሩብዓመት");
+  const q3Achievement = getQuarterAchievement(issue, "3ኛ ሩብዓመት");
+  const totalAchievement = q1Achievement + q2Achievement + q3Achievement;
+  
+  const progress = (totalAchievement / totalTarget) * 100;
+  return Math.min(100, Math.round(progress * 100) / 100);
+};
+
+// Updated mapProgress function using new calculation logic
 const mapProgress = (done, period, issue = null) => {
-  if (!done) done = 0;
+  if (!issue) return 0;
   
-  if (period === "Yearly") return done;
-  
-  if (period === "6 Months") {
-    return done <= 50 ? Math.round((done / 50) * 100) : 100;
-  }
-  
-  if (period === "9 Months") {
-    return done <= 75 ? Math.round((done / 75) * 100) : 100;
-  }
-
-  if (period.includes("ሩብዓመት")) {
-    if (!issue) {
-      switch (period) {
-        case "1ኛ ሩብዓመት":
-          return done <= 25 ? Math.round((done / 25) * 100) : 100;
-        case "2ኛ ሩብዓመት":
-          return done >= 26 && done <= 50
-            ? Math.round(((done - 26) / 24) * 100)
-            : done > 50
-            ? 100
-            : 0;
-        case "3ኛ ሩብዓመት":
-          return done >= 51 && done <= 75
-            ? Math.round(((done - 51) / 24) * 100)
-            : done > 75
-            ? 100
-            : 0;
-        case "4ኛ ሩብዓመት":
-          return done >= 76 && done <= 100
-            ? Math.round(((done - 76) / 24) * 100)
-            : done === 100
-            ? 100
-            : 0;
-        default:
-          return 0;
-      }
-    }
-    
-    if (!hasValidQuarterValue(issue, period)) {
+  switch (period) {
+    case "1ኛ ሩብዓመት":
+      return calculateQuarterProgress(issue, "1ኛ ሩብዓመት");
+    case "2ኛ ሩብዓመት":
+      return calculateQuarterProgress(issue, "2ኛ ሩብዓመት");
+    case "3ኛ ሩብዓመት":
+      return calculateQuarterProgress(issue, "3ኛ ሩብዓመት");
+    case "4ኛ ሩብዓመት":
+      return calculateQuarterProgress(issue, "4ኛ ሩብዓመት");
+    case "6 Months":
+      return calculateSixMonthsProgress(issue);
+    case "9 Months":
+      return calculateNineMonthsProgress(issue);
+    case "Yearly":
+      return calculateYearlyProgress(issue);
+    default:
       return 0;
-    }
-    
-    const validQuartersList = getValidQuartersList(issue);
-    const targetQuarterIndex = getQuarterIndex(period);
-    const range = getQuarterRanges(validQuartersList, period);
-    
-    if (done <= range.start) {
-      return 0;
-    } else if (done >= range.end) {
-      return 100;
-    } else {
-      const progressInRange = ((done - range.start) / (range.end - range.start)) * 100;
-      return Math.round(progressInRange);
-    }
   }
-  
-  return 0;
 };
 
+// For sub-issues (same logic)
+const mapSubIssueProgress = (done, period, subIssue = null) => {
+  return mapProgress(done, period, subIssue);
+};
+
+// ============================
+// TARGET VALUE FUNCTIONS
+// ============================
 const getWeight = (issue) => {
   const weightValue = getField(issue, "ክብደት");
   if (!weightValue || weightValue === "0" || weightValue === "") {
@@ -304,6 +261,34 @@ const filterIssuesByPeriod = (issues, period) => {
   });
 };
 
+// NEW: Check if a sub-issue has valid period value
+const hasValidPeriodValue = (issue, period) => {
+  if (!issue) return false;
+  
+  if (period === "Yearly") {
+    const yearlyValue = getField(issue, "የዓመቱ እቅድ");
+    return yearlyValue && yearlyValue !== "0" && yearlyValue !== "";
+  }
+  
+  if (period === "6 Months") {
+    const q1 = getField(issue, "1ኛ ሩብዓመት");
+    const q2 = getField(issue, "2ኛ ሩብዓመት");
+    return (q1 && q1 !== "0" && q1 !== "") || (q2 && q2 !== "0" && q2 !== "");
+  }
+  
+  if (period === "9 Months") {
+    const q1 = getField(issue, "1ኛ ሩብዓመት");
+    const q2 = getField(issue, "2ኛ ሩብዓመት");
+    const q3 = getField(issue, "3ኛ ሩብዓመት");
+    return (q1 && q1 !== "0" && q1 !== "") || 
+           (q2 && q2 !== "0" && q2 !== "") || 
+           (q3 && q3 !== "0" && q3 !== "");
+  }
+  
+  const val = getField(issue, period);
+  return val && val !== "0" && val !== "";
+};
+
 const getTargetValue = (issue, period) => {
   if (!issue) return "0";
   
@@ -334,12 +319,37 @@ const getTargetValue = (issue, period) => {
   return getField(issue, period) || "0";
 };
 
+// NEW: Get actual achievement value for a period
+const getAchievementValue = (issue, period) => {
+  if (!issue) return 0;
+  
+  if (period === "Yearly") {
+    return getTotalYearlyAchievement(issue);
+  }
+  
+  if (period === "6 Months") {
+    const q1Achievement = getQuarterAchievement(issue, "1ኛ ሩብዓመት");
+    const q2Achievement = getQuarterAchievement(issue, "2ኛ ሩብዓመት");
+    return q1Achievement + q2Achievement;
+  }
+  
+  if (period === "9 Months") {
+    const q1Achievement = getQuarterAchievement(issue, "1ኛ ሩብዓመት");
+    const q2Achievement = getQuarterAchievement(issue, "2ኛ ሩብዓመት");
+    const q3Achievement = getQuarterAchievement(issue, "3ኛ ሩብዓመት");
+    return q1Achievement + q2Achievement + q3Achievement;
+  }
+  
+  // For specific quarters
+  return getQuarterAchievement(issue, period);
+};
+
 const calculateActualValue = (achievement, targetValue, period) => {
   if (!achievement || !targetValue) return 0;
   const achievementNum = parseFloat(achievement.toString().trim());
   const targetNum = parseFloat(targetValue.toString().trim());
   if (isNaN(achievementNum) || isNaN(targetNum) || targetNum === 0) return 0;
-  return (achievementNum / 100) * targetNum;
+  return achievementNum;
 };
 
 const isValidTargetValue = (targetValue, period) => {
@@ -399,89 +409,267 @@ const extractGroupName = (assignedTo) => {
 };
 
 // ============================
-// PERFORMANCE CALCULATION FUNCTIONS
+// PERFORMANCE CALCULATION FUNCTIONS - UPDATED FOR CONSISTENCY
 // ============================
 
-const checkIfUserIsAssigned = (issue, user, projectMembersData) => {
-  if (!issue.assigned_to) return false;
+// NEW: Unified performance calculation function that works for both chart and details
+const calculateUserPerformance = (user, issues, period, projectMembers) => {
+  const userId = Number(user.id);
+  let totalWeight = 0;
+  let actualWeight = 0;
+  let completedIssues = 0;
+  let userIssues = [];
   
-  if (issue.assigned_to?.id === user.id) {
-    return true;
-  }
-  
-  if (issue.assigned_to && issue.assigned_to.name) {
-    const groupName = extractGroupName(issue.assigned_to);
-    const isGroup = isGroupAssignment(issue.assigned_to) || groupName !== "";
-    
-    if (isGroup && groupName) {
-      const userIdNum = Number(user.id);
-      const normalizedGroupName = normalizeGroupName(groupName);
-      const searchName = normalizedGroupName.toLowerCase().trim();
-      
-      if (issue.project?.id && projectMembersData[issue.project.id]) {
-        const projectData = projectMembersData[issue.project.id];
-        for (const [groupId, groupInfo] of Object.entries(projectData.groups || {})) {
-          const normalizedInfoName = normalizeGroupName(groupInfo.name).toLowerCase().trim();
-          if (normalizedInfoName.includes(searchName) || searchName.includes(normalizedInfoName)) {
-            const numericUserIds = groupInfo.userIds.map(id => Number(id));
-            if (numericUserIds.includes(userIdNum)) return true;
-          }
-        }
-      }
-      
-      for (const pid in projectMembersData) {
-        const projectData = projectMembersData[pid];
-        for (const [groupId, groupInfo] of Object.entries(projectData.groups || {})) {
-          const normalizedInfoName = normalizeGroupName(groupInfo.name).toLowerCase().trim();
-          if (normalizedInfoName.includes(searchName) || searchName.includes(normalizedInfoName)) {
-            const numericUserIds = groupInfo.userIds.map(id => Number(id));
-            if (numericUserIds.includes(userIdNum)) {
-              return true;
-            }
-          }
-        }
-      }
-    }
-  }
-  
-  return false;
-};
-
-const getSubIssuesForUser = (mainIssue, user, projectMembersData) => {
-  if (!mainIssue.children || mainIssue.children.length === 0) return [];
-  
-  return mainIssue.children.filter(subIssue => {
-    if (subIssue.assigned_to?.id === user.id) {
+  // Helper to check if user is assigned to an issue (directly or through group)
+  const isUserAssignedToIssue = (issue) => {
+    // Check direct assignment
+    if (issue.assigned_to?.id === userId) {
       return true;
     }
     
-    if (subIssue.assigned_to && subIssue.assigned_to.name) {
-      const groupName = extractGroupName(subIssue.assigned_to);
-      const isGroup = isGroupAssignment(subIssue.assigned_to) || groupName !== "";
+    // Check group assignment
+    if (issue.assigned_to && issue.assigned_to.name) {
+      const groupName = extractGroupName(issue.assigned_to);
+      const isGroup = isGroupAssignment(issue.assigned_to) || groupName !== "";
       
       if (isGroup && groupName) {
-        const userIdNum = Number(user.id);
         const normalizedGroupName = normalizeGroupName(groupName);
         const searchName = normalizedGroupName.toLowerCase().trim();
         
-        if (mainIssue.project?.id && projectMembersData[mainIssue.project.id]) {
-          const projectData = projectMembersData[mainIssue.project.id];
+        if (issue.project?.id && projectMembers[issue.project.id]) {
+          const projectData = projectMembers[issue.project.id];
           for (const [groupId, groupInfo] of Object.entries(projectData.groups || {})) {
             const normalizedInfoName = normalizeGroupName(groupInfo.name).toLowerCase().trim();
             if (normalizedInfoName.includes(searchName) || searchName.includes(normalizedInfoName)) {
               const numericUserIds = groupInfo.userIds.map(id => Number(id));
-              if (numericUserIds.includes(userIdNum)) return true;
+              if (numericUserIds.includes(userId)) return true;
             }
           }
         }
         
-        for (const pid in projectMembersData) {
-          const projectData = projectMembersData[pid];
+        for (const pid in projectMembers) {
+          const projectData = projectMembers[pid];
           for (const [groupId, groupInfo] of Object.entries(projectData.groups || {})) {
             const normalizedInfoName = normalizeGroupName(groupInfo.name).toLowerCase().trim();
             if (normalizedInfoName.includes(searchName) || searchName.includes(normalizedInfoName)) {
               const numericUserIds = groupInfo.userIds.map(id => Number(id));
-              if (numericUserIds.includes(userIdNum)) {
+              if (numericUserIds.includes(userId)) return true;
+            }
+          }
+        }
+      }
+    }
+    
+    return false;
+  };
+  
+  // Process all issues
+  issues.forEach(issue => {
+    // Check if this issue has period value
+    if (!hasValidPeriodValue(issue, period)) {
+      return;
+    }
+    
+    // Check if user is assigned to this issue
+    let isAssigned = isUserAssignedToIssue(issue);
+    
+    // For main issues with children, check sub-issues
+    if (issue.children?.length) {
+      let hasAssignedSubIssues = false;
+      let subIssueWeights = 0;
+      let subIssueActualWeights = 0;
+      
+      issue.children.forEach(subIssue => {
+        // Check if sub-issue has period value
+        if (!hasValidPeriodValue(subIssue, period)) {
+          return;
+        }
+        
+        // Check if user is assigned to sub-issue
+        let isSubAssigned = false;
+        if (subIssue.assigned_to?.id === userId) {
+          isSubAssigned = true;
+        } else if (subIssue.assigned_to && subIssue.assigned_to.name) {
+          const groupName = extractGroupName(subIssue.assigned_to);
+          const isGroup = isGroupAssignment(subIssue.assigned_to) || groupName !== "";
+          
+          if (isGroup && groupName) {
+            const normalizedGroupName = normalizeGroupName(groupName);
+            const searchName = normalizedGroupName.toLowerCase().trim();
+            
+            if (issue.project?.id && projectMembers[issue.project.id]) {
+              const projectData = projectMembers[issue.project.id];
+              for (const [groupId, groupInfo] of Object.entries(projectData.groups || {})) {
+                const normalizedInfoName = normalizeGroupName(groupInfo.name).toLowerCase().trim();
+                if (normalizedInfoName.includes(searchName) || searchName.includes(normalizedInfoName)) {
+                  const numericUserIds = groupInfo.userIds.map(id => Number(id));
+                  if (numericUserIds.includes(userId)) {
+                    isSubAssigned = true;
+                  }
+                }
+              }
+            }
+            
+            if (!isSubAssigned) {
+              for (const pid in projectMembers) {
+                const projectData = projectMembers[pid];
+                for (const [groupId, groupInfo] of Object.entries(projectData.groups || {})) {
+                  const normalizedInfoName = normalizeGroupName(groupInfo.name).toLowerCase().trim();
+                  if (normalizedInfoName.includes(searchName) || searchName.includes(normalizedInfoName)) {
+                    const numericUserIds = groupInfo.userIds.map(id => Number(id));
+                    if (numericUserIds.includes(userId)) {
+                      isSubAssigned = true;
+                      break;
+                    }
+                  }
+                }
+                if (isSubAssigned) break;
+              }
+            }
+          }
+        }
+        
+        if (isSubAssigned) {
+          hasAssignedSubIssues = true;
+          const weight = getWeight(subIssue);
+          const progress = mapProgress(subIssue.done_ratio || 0, period, subIssue);
+          const actual = (weight * progress) / 100;
+          
+          subIssueWeights += weight;
+          subIssueActualWeights += actual;
+          
+          if (progress === 100) completedIssues++;
+          userIssues.push(subIssue);
+        }
+      });
+      
+      if (hasAssignedSubIssues) {
+        totalWeight += subIssueWeights;
+        actualWeight += subIssueActualWeights;
+      } else if (isAssigned) {
+        // User is assigned to main issue but has no assigned sub-issues
+        const weight = getWeight(issue);
+        const progress = mapProgress(issue.done_ratio || 0, period, issue);
+        const actual = (weight * progress) / 100;
+        
+        totalWeight += weight;
+        actualWeight += actual;
+        
+        if (progress === 100) completedIssues++;
+        userIssues.push(issue);
+      }
+    } else if (isAssigned) {
+      // Main issue without children, user is directly assigned
+      const weight = getWeight(issue);
+      const progress = mapProgress(issue.done_ratio || 0, period, issue);
+      const actual = (weight * progress) / 100;
+      
+      totalWeight += weight;
+      actualWeight += actual;
+      
+      if (progress === 100) completedIssues++;
+      userIssues.push(issue);
+    }
+  });
+  
+  // Calculate performance
+  const performance = totalWeight > 0 ? Math.round((actualWeight / totalWeight) * 100) : 0;
+  
+  return {
+    id: user.id || 0,
+    name: user.name || "Unknown User",
+    login: user.login || "",
+    performance: performance,
+    rawPerformance: actualWeight || 0,
+    maxWeight: totalWeight || 0,
+    completedIssues: completedIssues || 0,
+    totalIssues: userIssues.length || 0,
+    issues: userIssues,
+    color: getProgressColor(performance)
+  };
+};
+
+// Updated personal plan performance calculation using the unified function
+const calculatePersonalPlanPerformance = (usersData, issuesData, period, projectMembersData) => {
+  // First filter issues by period
+  const periodIssues = filterIssuesByPeriod(issuesData, period);
+  
+  return usersData.map((user) => {
+    return calculateUserPerformance(user, periodIssues, period, projectMembersData);
+  });
+};
+
+// FIXED FUNCTION: Calculate period-specific weights
+const calculateWeightsForPeriod = (user, issues, period, projectMembers) => {
+  let mainIssueWeight = 0;
+  let subIssueWeight = 0;
+  let totalWeight = 0;
+  
+  const userId = Number(user.id);
+  
+  // Helper function to check if a sub-issue has period value
+  const subIssueHasPeriodValue = (subIssue, period) => {
+    // Check if sub-issue itself has period value
+    const subIssuePeriodValue = getTargetValue(subIssue, period);
+    if (isValidTargetValue(subIssuePeriodValue, period)) {
+      return true;
+    }
+    
+    // Also check if sub-issue has any custom field for this period
+    if (period === "Yearly") {
+      const yearlyValue = getField(subIssue, "የዓመቱ እቅድ");
+      return yearlyValue && yearlyValue !== "0" && yearlyValue !== "";
+    } else if (period === "6 Months") {
+      const q1 = getField(subIssue, "1ኛ ሩብዓመት");
+      const q2 = getField(subIssue, "2ኛ ሩብዓመት");
+      return (q1 && q1 !== "0" && q1 !== "") || (q2 && q2 !== "0" && q2 !== "");
+    } else if (period === "9 Months") {
+      const q1 = getField(subIssue, "1ኛ ሩብዓመት");
+      const q2 = getField(subIssue, "2ኛ ሩብዓመት");
+      const q3 = getField(subIssue, "3ኛ ሩብዓመት");
+      return (q1 && q1 !== "0" && q1 !== "") || 
+             (q2 && q2 !== "0" && q2 !== "") || 
+             (q3 && q3 !== "0" && q3 !== "");
+    } else {
+      const val = getField(subIssue, period);
+      return val && val !== "0" && val !== "";
+    }
+  };
+  
+  // Helper to check if user is assigned to issue
+  const isUserAssignedToIssue = (issue) => {
+    if (issue.assigned_to?.id === userId) {
+      return true;
+    }
+    
+    if (issue.assigned_to && issue.assigned_to.name) {
+      const groupName = extractGroupName(issue.assigned_to);
+      const isGroup = isGroupAssignment(issue.assigned_to) || groupName !== "";
+      
+      if (isGroup && groupName) {
+        const normalizedGroupName = normalizeGroupName(groupName);
+        const searchName = normalizedGroupName.toLowerCase().trim();
+        
+        if (issue.project?.id && projectMembers[issue.project.id]) {
+          const projectData = projectMembers[issue.project.id];
+          for (const [groupId, groupInfo] of Object.entries(projectData.groups || {})) {
+            const normalizedInfoName = normalizeGroupName(groupInfo.name).toLowerCase().trim();
+            if (normalizedInfoName.includes(searchName) || searchName.includes(normalizedInfoName)) {
+              const numericUserIds = groupInfo.userIds.map(id => Number(id));
+              if (numericUserIds.includes(userId)) {
+                return true;
+              }
+            }
+          }
+        }
+        
+        for (const pid in projectMembers) {
+          const projectData = projectMembers[pid];
+          for (const [groupId, groupInfo] of Object.entries(projectData.groups || {})) {
+            const normalizedInfoName = normalizeGroupName(groupInfo.name).toLowerCase().trim();
+            if (normalizedInfoName.includes(searchName) || searchName.includes(normalizedInfoName)) {
+              const numericUserIds = groupInfo.userIds.map(id => Number(id));
+              if (numericUserIds.includes(userId)) {
                 return true;
               }
             }
@@ -491,172 +679,125 @@ const getSubIssuesForUser = (mainIssue, user, projectMembersData) => {
     }
     
     return false;
-  });
-};
-
-const calculateDetailedTasksPerformance = (usersData, issuesData, period, projectMembersData) => {
-  return usersData.map((user) => {
-    let totalIssueWeight = 0;
-    let totalActualWeight = 0;
-    let assignedOneLevelIssuesCount = 0;
+  };
+  
+  // Check all main issues first
+  issues.forEach((mainIssue) => {
+    // Check if main issue has period value
+    const mainIssueHasPeriodValue = () => {
+      if (period === "Yearly") {
+        const yearlyValue = getField(mainIssue, "የዓመቱ እቅድ");
+        return yearlyValue && yearlyValue !== "0" && yearlyValue !== "";
+      } else if (period === "6 Months") {
+        const q1 = getField(mainIssue, "1ኛ ሩብዓመት");
+        const q2 = getField(mainIssue, "2ኛ ሩብዓመት");
+        return (q1 && q1 !== "0" && q1 !== "") || (q2 && q2 !== "0" && q2 !== "");
+      } else if (period === "9 Months") {
+        const q1 = getField(mainIssue, "1ኛ ሩብዓመት");
+        const q2 = getField(mainIssue, "2ኛ ሩብዓመት");
+        const q3 = getField(mainIssue, "3ኛ ሩብዓመት");
+        return (q1 && q1 !== "0" && q1 !== "") || 
+               (q2 && q2 !== "0" && q2 !== "") || 
+               (q3 && q3 !== "0" && q3 !== "");
+      } else {
+        const val = getField(mainIssue, period);
+        return val && val !== "0" && val !== "";
+      }
+    };
     
-    issuesData.forEach((mainIssue) => {
-      const isAssigned = checkIfUserIsAssigned(mainIssue, user, projectMembersData);
-      
-      if (isAssigned) {
-        const hasValidPeriodValue = period === "Yearly" 
-          ? isValidTargetValue(getField(mainIssue, "የዓመቱ እቅድ"), period)
-          : period === "6 Months"
-          ? (isValidTargetValue(getField(mainIssue, "1ኛ ሩብዓመት"), period) || 
-             isValidTargetValue(getField(mainIssue, "2ኛ ሩብዓመት"), period))
-          : period === "9 Months"
-          ? (isValidTargetValue(getField(mainIssue, "1ኛ ሩብዓመት"), period) || 
-             isValidTargetValue(getField(mainIssue, "2ኛ ሩብዓመት"), period) ||
-             isValidTargetValue(getField(mainIssue, "3ኛ ሩብዓመት"), period))
-          : isValidTargetValue(getField(mainIssue, period), period);
+    if (!mainIssueHasPeriodValue()) {
+      return; // Skip issues without period value
+    }
+    
+    // Check if this main issue has sub-issues assigned to this user WITH PERIOD VALUES
+    let hasAssignedSubIssuesWithPeriod = false;
+    const assignedSubIssuesWithPeriod = [];
+    
+    if (mainIssue.children?.length) {
+      mainIssue.children.forEach(sub => {
+        // Check if sub-issue has period value
+        if (!subIssueHasPeriodValue(sub, period)) {
+          return;
+        }
         
-        if (hasValidPeriodValue) {
-          assignedOneLevelIssuesCount++;
-          const issueWeight = getWeight(mainIssue);
-          totalIssueWeight += issueWeight;
+        // Check if user is assigned to sub-issue
+        let isSubAssigned = false;
+        if (sub.assigned_to?.id === userId) {
+          isSubAssigned = true;
+        }
+        
+        if (!isSubAssigned && sub.assigned_to && sub.assigned_to.name) {
+          const groupName = extractGroupName(sub.assigned_to);
+          const isGroup = isGroupAssignment(sub.assigned_to) || groupName !== "";
           
-          const subIssues = getSubIssuesForUser(mainIssue, user, projectMembersData);
-          
-          if (subIssues.length > 0) {
-            let totalMappedDonePercent = 0;
-            let validSubIssuesCount = 0;
+          if (isGroup && groupName) {
+            const normalizedGroupName = normalizeGroupName(groupName);
+            const searchName = normalizedGroupName.toLowerCase().trim();
             
-            subIssues.forEach(sub => {
-              const rawDonePercent = sub.done_ratio || 0;
-              const mappedDonePercent = mapSubIssueProgress(rawDonePercent, period, sub);
-              
-              if (period === "Yearly") {
-                totalMappedDonePercent += mappedDonePercent;
-                validSubIssuesCount++;
-              } else if (period.includes("ሩብዓመት")) {
-                if (hasValidQuarterValue(sub, period)) {
-                  totalMappedDonePercent += mappedDonePercent;
-                  validSubIssuesCount++;
-                }
-              } else if (period === "6 Months") {
-                if (hasValidQuarterValue(sub, "1ኛ ሩብዓመት") || 
-                    hasValidQuarterValue(sub, "2ኛ ሩብዓመት")) {
-                  totalMappedDonePercent += mappedDonePercent;
-                  validSubIssuesCount++;
-                }
-              } else if (period === "9 Months") {
-                if (hasValidQuarterValue(sub, "1ኛ ሩብዓመት") || 
-                    hasValidQuarterValue(sub, "2ኛ ሩብዓመት") ||
-                    hasValidQuarterValue(sub, "3ኛ ሩብዓመት")) {
-                  totalMappedDonePercent += mappedDonePercent;
-                  validSubIssuesCount++;
+            if (mainIssue.project?.id && projectMembers[mainIssue.project.id]) {
+              const projectData = projectMembers[mainIssue.project.id];
+              for (const [groupId, groupInfo] of Object.entries(projectData.groups || {})) {
+                const normalizedInfoName = normalizeGroupName(groupInfo.name).toLowerCase().trim();
+                if (normalizedInfoName.includes(searchName) || searchName.includes(normalizedInfoName)) {
+                  const numericUserIds = groupInfo.userIds.map(id => Number(id));
+                  if (numericUserIds.includes(userId)) {
+                    isSubAssigned = true;
+                  }
                 }
               }
-            });
+            }
             
-            if (validSubIssuesCount > 0) {
-              const avgMappedDonePercent = totalMappedDonePercent / validSubIssuesCount;
-              const actualWeight = (issueWeight * avgMappedDonePercent) / 100;
-              totalActualWeight += actualWeight;
+            if (!isSubAssigned) {
+              for (const pid in projectMembers) {
+                const projectData = projectMembers[pid];
+                for (const [groupId, groupInfo] of Object.entries(projectData.groups || {})) {
+                  const normalizedInfoName = normalizeGroupName(groupInfo.name).toLowerCase().trim();
+                  if (normalizedInfoName.includes(searchName) || searchName.includes(normalizedInfoName)) {
+                    const numericUserIds = groupInfo.userIds.map(id => Number(id));
+                    if (numericUserIds.includes(userId)) {
+                      isSubAssigned = true;
+                      break;
+                    }
+                  }
+                }
+                if (isSubAssigned) break;
+              }
             }
           }
         }
-      }
-    });
-    
-    const performance = totalIssueWeight > 0 
-      ? Math.round((totalActualWeight * 100) / totalIssueWeight) 
-      : 0;
-    
-    return {
-      id: user.id,
-      name: user.name,
-      performance: performance,
-      totalIssueWeight: totalIssueWeight,
-      totalActualWeight: totalActualWeight,
-      assignedOneLevelIssuesCount: assignedOneLevelIssuesCount,
-      color: getProgressColor(performance)
-    };
-  });
-};
-
-const calculatePersonalPlanPerformance = (usersData, issuesData, period, projectMembersData) => {
-  return usersData.map((user) => {
-    let userWeight = 0;
-    let userMaxWeight = 0;
-    const userSubIssues = [];
-    let completedIssues = 0;
-
-    issuesData.forEach((mainIssue) => {
-      if (mainIssue.children?.length) {
-        const assignedSubIssues = mainIssue.children.filter(sub => {
-          if (sub.assigned_to?.id === user.id) {
-            return true;
-          }
-          
-          if (sub.assigned_to && sub.assigned_to.name) {
-            const groupName = extractGroupName(sub.assigned_to);
-            const isGroup = isGroupAssignment(sub.assigned_to) || groupName !== "";
-            
-            if (isGroup && groupName) {
-              const userIdNum = Number(user.id);
-              const normalizedGroupName = normalizeGroupName(groupName);
-              const searchName = normalizedGroupName.toLowerCase().trim();
-              
-              if (mainIssue.project?.id && projectMembersData[mainIssue.project.id]) {
-                const projectData = projectMembersData[mainIssue.project.id];
-                for (const [groupId, groupInfo] of Object.entries(projectData.groups || {})) {
-                  const normalizedInfoName = normalizeGroupName(groupInfo.name).toLowerCase().trim();
-                  if (normalizedInfoName.includes(searchName) || searchName.includes(normalizedInfoName)) {
-                    const numericUserIds = groupInfo.userIds.map(id => Number(id));
-                    if (numericUserIds.includes(userIdNum)) return true;
-                  }
-                }
-              }
-              
-              for (const pid in projectMembersData) {
-                const projectData = projectMembersData[pid];
-                for (const [groupId, groupInfo] of Object.entries(projectData.groups || {})) {
-                  const normalizedInfoName = normalizeGroupName(groupInfo.name).toLowerCase().trim();
-                  if (normalizedInfoName.includes(searchName) || searchName.includes(normalizedInfoName)) {
-                    const numericUserIds = groupInfo.userIds.map(id => Number(id));
-                    if (numericUserIds.includes(userIdNum)) return true;
-                  }
-                }
-              }
-            }
-          }
-          
-          return false;
-        });
         
-        userSubIssues.push(...assignedSubIssues);
-      }
-    });
-
-    userSubIssues.forEach((sub) => {
-      const weight = getWeight(sub);
-      const progress = mapProgress(sub.done_ratio || 0, period, sub);
-      userWeight += (weight * progress) / 100;
-      userMaxWeight += weight;
-      if (progress === 100) completedIssues++;
-    });
-
-    const performance = userMaxWeight > 0 ? Math.round((userWeight / userMaxWeight) * 100) : 0;
-
-    return {
-      id: user.id || 0,
-      name: user.name || "Unknown User",
-      login: user.login || "",
-      performance: performance,
-      rawPerformance: userWeight || 0,
-      maxWeight: userMaxWeight || 0,
-      issues: userSubIssues,
-      completedIssues: completedIssues || 0,
-      totalIssues: userSubIssues.length || 0,
-      color: getProgressColor(performance)
-    };
+        // If sub-issue is assigned to user AND has period value, add it
+        if (isSubAssigned) {
+          hasAssignedSubIssuesWithPeriod = true;
+          assignedSubIssuesWithPeriod.push(sub);
+        }
+      });
+    }
+    
+    // Check if user is assigned to main issue
+    const isAssignedToMainIssue = isUserAssignedToIssue(mainIssue);
+    
+    // Apply the rule:
+    // 1. If main issue has assigned sub-issues WITH PERIOD VALUES, add sub-issue weights
+    // 2. If main issue has NO assigned sub-issues WITH PERIOD VALUES but user is assigned to main issue AND main issue has period value, add main issue weight
+    if (hasAssignedSubIssuesWithPeriod) {
+      // Add weights of all sub-issues assigned to this user WITH PERIOD VALUES
+      assignedSubIssuesWithPeriod.forEach(sub => {
+        subIssueWeight += getWeight(sub);
+      });
+    } else if (isAssignedToMainIssue) {
+      // User is assigned to main issue but has no assigned sub-issues WITH PERIOD VALUES, and main issue has period value
+      mainIssueWeight += getWeight(mainIssue);
+    }
   });
+  
+  totalWeight = mainIssueWeight + subIssueWeight;
+  
+  return {
+    mainIssueWeight,
+    subIssueWeight,
+    totalWeight
+  };
 };
 
 // ============================
@@ -670,10 +811,8 @@ function TeamLeaderDashboard() {
   const [groupUsers, setGroupUsers] = useState([]);
   const [currentUser, setCurrentUser] = useState(null);
   const [userPerformanceData, setUserPerformanceData] = useState([]);
-  const [detailedTasksPerformanceData, setDetailedTasksPerformanceData] = useState([]);
   const [selectedUser, setSelectedUser] = useState(null);
   const [selectedUserIssues, setSelectedUserIssues] = useState([]);
-  const [selectedUserDetailedData, setSelectedUserDetailedData] = useState(null);
   const [bestPerformer, setBestPerformer] = useState({
     name: "None",
     performance: 0,
@@ -686,10 +825,7 @@ function TeamLeaderDashboard() {
     issues: [],
     color: "#f44336",
     isMultiple: false,
-    count: 1,
-    totalIssueWeight: 0,
-    totalActualWeight: 0,
-    assignedOneLevelIssuesCount: 0
+    count: 1
   });
   const [statuses, setStatuses] = useState([]);
   const [activeTab, setActiveTab] = useState("performance");
@@ -874,18 +1010,80 @@ function TeamLeaderDashboard() {
     return [];
   }, [viewList, assignedIssues, notAssignedIssues, filteredIssues]);
 
+  // UPDATED: Use the unified performance calculation for both chart and details
   const currentPerformanceData = useMemo(() => {
     return calculatePersonalPlanPerformance(groupUsers, issues, selectedPeriod, projectMembers);
   }, [groupUsers, issues, selectedPeriod, projectMembers]);
 
-  const currentDetailedTasksPerformanceData = useMemo(() => {
-    return calculateDetailedTasksPerformance(groupUsers, issues, selectedPeriod, projectMembers);
-  }, [groupUsers, issues, selectedPeriod, projectMembers]);
+  // UPDATED: Calculate user performance using the same unified function
+  const getUserPerformanceDetails = useMemo(() => {
+    if (!selectedUser) return null;
+    
+    // Recalculate using the same logic as the chart
+    const periodIssues = filterIssuesByPeriod(issues, selectedPeriod);
+    return calculateUserPerformance(selectedUser, periodIssues, selectedPeriod, projectMembers);
+  }, [selectedUser, issues, selectedPeriod, projectMembers]);
+
+  // UPDATED: Get all assigned issues using the same logic
+  const getAllAssignedIssuesForUser = useMemo(() => {
+    if (!selectedUser || !getUserPerformanceDetails) return [];
+    return getUserPerformanceDetails.issues || [];
+  }, [selectedUser, getUserPerformanceDetails]);
+
+  // UPDATED: Calculate weight summary using the same logic
+  const calculateTotalWeightIncludingMainIssues = useMemo(() => {
+    if (!getUserPerformanceDetails) {
+      return { totalWeight: 0, actualWeight: 0, totalTasks: 0 };
+    }
+    
+    return {
+      totalWeight: getUserPerformanceDetails.maxWeight || 0,
+      actualWeight: getUserPerformanceDetails.rawPerformance || 0,
+      totalTasks: getUserPerformanceDetails.totalIssues || 0
+    };
+  }, [getUserPerformanceDetails]);
+
+  // UPDATED: Performance is directly from the unified calculation
+  const calculatePerformanceFromWeights = useMemo(() => {
+    if (!getUserPerformanceDetails) return 0;
+    return getUserPerformanceDetails.performance || 0;
+  }, [getUserPerformanceDetails]);
+
+  // Calculate best performers and team average
+  const bestPerformersData = useMemo(() => {
+    // Filter out users with 0 performance
+    const usersWithPerformance = currentPerformanceData.filter(user => user.performance > 0);
+    
+    if (usersWithPerformance.length === 0) {
+      return {
+        bestPerformers: [],
+        maxPerformance: 0,
+        teamAverage: 0
+      };
+    }
+    
+    // Find maximum performance
+    const maxPerformance = Math.max(...usersWithPerformance.map(user => user.performance));
+    
+    // Find all users with the maximum performance (could be multiple)
+    const bestPerformers = usersWithPerformance.filter(user => user.performance === maxPerformance);
+    
+    // Calculate team average (excluding users with 0 performance)
+    const teamAverage = usersWithPerformance.length > 0 
+      ? Math.round(usersWithPerformance.reduce((sum, user) => sum + user.performance, 0) / usersWithPerformance.length)
+      : 0;
+    
+    return {
+      bestPerformers,
+      maxPerformance,
+      teamAverage
+    };
+  }, [currentPerformanceData]);
 
   useEffect(() => {
-    if (currentDetailedTasksPerformanceData.length > 0) {
-      const maxPerformance = Math.max(...currentDetailedTasksPerformanceData.map(user => user.performance || 0));
-      const bestPerformers = currentDetailedTasksPerformanceData.filter(user => (user.performance || 0) === maxPerformance);
+    if (currentPerformanceData.length > 0) {
+      const maxPerformance = Math.max(...currentPerformanceData.map(user => user.performance || 0));
+      const bestPerformers = currentPerformanceData.filter(user => (user.performance || 0) === maxPerformance);
       
       if (bestPerformers.length > 0) {
         const compositeBestPerformer = {
@@ -893,13 +1091,10 @@ function TeamLeaderDashboard() {
             ? bestPerformers[0].name 
             : bestPerformers.map(u => u.name).join(', '),
           performance: maxPerformance,
-          totalIssueWeight: bestPerformers.reduce((sum, user) => sum + (user.totalIssueWeight || 0), 0) / bestPerformers.length,
-          totalActualWeight: bestPerformers.reduce((sum, user) => sum + (user.totalActualWeight || 0), 0) / bestPerformers.length,
-          assignedOneLevelIssuesCount: bestPerformers.reduce((sum, user) => sum + (user.assignedOneLevelIssuesCount || 0), 0),
-          rawPerformance: bestPerformers.reduce((sum, user) => sum + (user.totalActualWeight || 0), 0) / bestPerformers.length,
-          maxWeight: bestPerformers.reduce((sum, user) => sum + (user.totalIssueWeight || 0), 0) / bestPerformers.length,
-          completedIssues: 0,
-          totalIssues: bestPerformers.reduce((sum, user) => sum + (user.assignedOneLevelIssuesCount || 0), 0),
+          rawPerformance: bestPerformers.reduce((sum, user) => sum + (user.rawPerformance || 0), 0) / bestPerformers.length,
+          maxWeight: bestPerformers.reduce((sum, user) => sum + (user.maxWeight || 0), 0) / bestPerformers.length,
+          completedIssues: bestPerformers.reduce((sum, user) => sum + (user.completedIssues || 0), 0),
+          totalIssues: bestPerformers.reduce((sum, user) => sum + (user.totalIssues || 0), 0),
           isMultiple: bestPerformers.length > 1,
           count: bestPerformers.length,
           id: null,
@@ -921,10 +1116,7 @@ function TeamLeaderDashboard() {
           issues: [],
           color: "#f44336",
           isMultiple: false,
-          count: 1,
-          totalIssueWeight: 0,
-          totalActualWeight: 0,
-          assignedOneLevelIssuesCount: 0
+          count: 1
         });
       }
     } else {
@@ -940,13 +1132,10 @@ function TeamLeaderDashboard() {
         issues: [],
         color: "#f44336",
         isMultiple: false,
-        count: 1,
-        totalIssueWeight: 0,
-        totalActualWeight: 0,
-        assignedOneLevelIssuesCount: 0
+        count: 1
       });
     }
-  }, [currentDetailedTasksPerformanceData]);
+  }, [currentPerformanceData]);
 
   const chartData = useMemo(() => 
     filteredIssues.map(issue => ({
@@ -962,14 +1151,19 @@ function TeamLeaderDashboard() {
     })), 
   [filteredIssues, selectedPeriod]);
 
+  // UPDATED: Modified to remove Status and Project columns and add Actual Weight column
   const selectedUserTableData = useMemo(() => {
-    if (!selectedUser || !selectedUser.issues || selectedUser.issues.length === 0) return [];
+    if (!selectedUser || getAllAssignedIssuesForUser.length === 0) return [];
     
-    const data = selectedUser.issues.map(issue => {
+    const data = getAllAssignedIssuesForUser.map(issue => {
       const measurement = getField(issue, "መለኪያ") || "N/A";
       const targetValue = getTargetValue(issue, selectedPeriod);
-      const achievement = mapProgress(issue.done_ratio || 0, selectedPeriod, issue);
-      const actual = calculateActualValue(achievement, targetValue, selectedPeriod);
+      const achievement = getAchievementValue(issue, selectedPeriod);
+      const progress = mapProgress(issue.done_ratio || 0, selectedPeriod, issue);
+      const weight = getWeight(issue);
+      
+      // Calculate Actual Weight: (progress * weight) / 100
+      const actualWeight = (progress * weight) / 100;
       
       return {
         id: issue.id,
@@ -977,15 +1171,18 @@ function TeamLeaderDashboard() {
         measurement: measurement,
         targetValue: targetValue,
         achievement: achievement,
-        actual: actual,
-        status: issue.status?.name || "Unknown",
-        project: issue.project?.name || "N/A",
-        hasValidTarget: isValidTargetValue(targetValue, selectedPeriod)
+        actual: achievement,
+        progress: progress,
+        weight: weight,
+        actualWeight: actualWeight,
+        hasValidTarget: isValidTargetValue(targetValue, selectedPeriod),
+        isMainIssue: !issue.parent, // Flag to identify if this is a main issue
+        hasChildren: issue.children?.length > 0
       };
     });
     
     return data.filter(row => row.hasValidTarget);
-  }, [selectedUser, selectedPeriod]);
+  }, [selectedUser, getAllAssignedIssuesForUser, selectedPeriod]);
 
   const analyticsTableData = useMemo(() => {
     if (filteredIssues.length === 0) return [];
@@ -993,8 +1190,8 @@ function TeamLeaderDashboard() {
     const data = filteredIssues.map(issue => {
       const measurement = getField(issue, "መለኪያ") || "N/A";
       const targetValue = getTargetValue(issue, selectedPeriod);
-      const achievement = mapProgress(issue.done_ratio || 0, selectedPeriod, issue);
-      const actual = calculateActualValue(achievement, targetValue, selectedPeriod);
+      const achievement = getAchievementValue(issue, selectedPeriod);
+      const progress = mapProgress(issue.done_ratio || 0, selectedPeriod, issue);
       
       return {
         id: issue.id,
@@ -1002,7 +1199,8 @@ function TeamLeaderDashboard() {
         measurement: measurement,
         targetValue: targetValue,
         achievement: achievement,
-        actual: actual,
+        actual: achievement,
+        progress: progress,
         status: issue.status?.name || "Unknown",
         project: issue.project?.name || "N/A",
         assignedTo: issue.assigned_to?.name || "Unassigned",
@@ -1152,9 +1350,6 @@ function TeamLeaderDashboard() {
       const initialPeriod = "Yearly";
       const performance = calculatePersonalPlanPerformance(groupUsersData, issuesData, initialPeriod, projectMembersData);
       setUserPerformanceData(performance);
-      
-      const detailedTasksPerformance = calculateDetailedTasksPerformance(groupUsersData, issuesData, initialPeriod, projectMembersData);
-      setDetailedTasksPerformanceData(detailedTasksPerformance);
 
     } catch (err) {
       console.error("Failed to load dashboard data:", err);
@@ -1162,7 +1357,7 @@ function TeamLeaderDashboard() {
     } finally {
       setLoading(false);
     }
-  }, [getCachedGroupDetails]); // Removed selectedPeriod from dependencies
+  }, [getCachedGroupDetails]);
 
   useEffect(() => {
     loadData();
@@ -1184,15 +1379,13 @@ function TeamLeaderDashboard() {
 
   const handleUserSelect = useCallback((user) => {
     const userPersonalData = currentPerformanceData.find(u => u.id === user.id);
-    const userDetailedData = currentDetailedTasksPerformanceData.find(u => u.id === user.id);
     
     setSelectedUser(userPersonalData || user);
-    setSelectedUserDetailedData(userDetailedData);
     
     if (userPersonalData) {
       setSelectedUserIssues(userPersonalData.issues || []);
     }
-  }, [currentPerformanceData, currentDetailedTasksPerformanceData]);
+  }, [currentPerformanceData]);
 
   const handleGroupMemberSelect = useCallback((member) => {
     setSelectedGroupMember(member);
@@ -1343,57 +1536,6 @@ function TeamLeaderDashboard() {
     return null;
   };
 
-  const DetailedTasksPerformanceTooltip = ({ active, payload, label }) => {
-    if (active && payload && payload.length) {
-      const data = payload[0].payload;
-      return (
-        <div className="custom-tooltip" style={{
-          backgroundColor: '#fff',
-          padding: '10px',
-          border: '1px solid #ccc',
-          borderRadius: '4px',
-          boxShadow: '0 2px 5px rgba(0,0,0,0.1)',
-          minWidth: '300px'
-        }}>
-          <p style={{ fontWeight: 'bold', marginBottom: '8px', borderBottom: '1px solid #eee', paddingBottom: '5px' }}>
-            {label}
-          </p>
-          <p style={{ marginBottom: '5px' }}>
-            <strong>ዝርዝር ተግባራት Performance:</strong> {(data.performance || 0)}%
-          </p>
-          <p style={{ marginBottom: '5px' }}>
-            <strong>Assigned ዝርዝር ተግባራት:</strong> {data.assignedOneLevelIssuesCount || 0}
-          </p>
-          <p style={{ marginBottom: '5px' }}>
-            <strong>Weight Calculation:</strong>
-          </p>
-          <p style={{ fontSize: '11px', color: '#666', marginBottom: '3px' }}>
-            Total Issue Weight: {data.totalIssueWeight?.toFixed(1) || 0}
-          </p>
-          <p style={{ fontSize: '11px', color: '#666' }}>
-            Total Actual Weight: {data.totalActualWeight?.toFixed(1) || 0}
-          </p>
-          <p style={{ marginBottom: '5px' }}>
-            <strong>Period:</strong> {selectedPeriod}
-            {selectedPeriod.includes("ሩብዓመት") && ` (Quarter ${getQuarterIndex(selectedPeriod)})`}
-          </p>
-          <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid #eee', fontSize: '11px' }}>
-            <p style={{ marginBottom: '2px', color: '#888' }}>
-              <strong>Calculation:</strong>
-            </p>
-            <p style={{ marginBottom: '2px', color: '#666' }}>
-              1. ∑(Issue Weight × Avg Sub-Issue Progress) ÷ ∑Issue Weight
-            </p>
-            <p style={{ marginBottom: '0', color: '#666' }}>
-              2. Sub-issues use their OWN quarter values for progress mapping
-            </p>
-          </div>
-        </div>
-      );
-    }
-    return null;
-  };
-
   if (loading) {
     return (
       <div className="loading-container" style={{
@@ -1471,7 +1613,7 @@ function TeamLeaderDashboard() {
           flexWrap: 'wrap',
           gap: '20px'
         }}>
-          <h1 style={{ margin: 0, color: '#333' }}>Team Leader Dashboard</h1>
+          
           <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
             <button
               onClick={handleRefresh}
@@ -1521,7 +1663,7 @@ function TeamLeaderDashboard() {
               </div>
               <div>
                 <div style={{ fontSize: '12px', color: '#666', marginBottom: '5px' }}>
-                  Total Members/Users
+                  Total Members
                 </div>
                 <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#1976d2' }}>
                   {groupUsers.length}
@@ -1641,7 +1783,6 @@ function TeamLeaderDashboard() {
               setActiveTab(tab);
               if (tab !== 'performance') {
                 setSelectedUser(null);
-                setSelectedUserDetailedData(null);
               }
               if (tab === 'personal-plan') {
                 if (currentUser) {
@@ -1667,505 +1808,470 @@ function TeamLeaderDashboard() {
         ))}
       </div>
 
-      {/* Period Info Banner */}
-      {(activeTab === 'performance' || activeTab === 'analytics') && (
-        <div style={{
-          backgroundColor: '#e3f2fd',
-          padding: '10px 15px',
-          borderRadius: '8px',
-          marginBottom: '20px',
-          borderLeft: '4px solid #1976d2'
-        }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div>
-              <strong>Selected Period:</strong> {selectedPeriod}
-              {selectedPeriod === "Yearly" && " (የዓመቱ እቅድ)"}
-              {selectedPeriod === "6 Months" && " (1ኛ ሩብዓመት + 2ኛ ሩብዓመት)"}
-              {selectedPeriod === "9 Months" && " (1ኛ ሩብዓመት + 2ኛ ሩብዓመት + 3ኛ ሩብዓመት)"}
-            </div>
-            <div style={{ fontSize: '12px', color: '#666' }}>
-              Showing {filteredIssues.length} of {issues.length} total ዝርዝር ተግባራት
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Best Performer Section */}
-      {bestPerformer && bestPerformer.name !== "None" && activeTab === 'performance' && !selectedUser && (
-        <div style={{
-          maxWidth: "800px",
-          margin: "0 auto 30px auto",
-          padding: "25px",
-          background: bestPerformer.isMultiple 
-            ? "linear-gradient(135deg, #2e7d32, #4caf50)" 
-            : "linear-gradient(135deg, #ff9800, #ff5722)",
-          color: "#fff",
-          borderRadius: "16px",
-          boxShadow: "0 6px 15px rgba(0,0,0,0.2)",
-          textAlign: "center",
-          position: 'relative',
-          overflow: 'hidden'
-        }}>
-          <div style={{
-            position: 'absolute',
-            top: '-20px',
-            right: '-20px',
-            fontSize: '80px',
-            opacity: 0.2
-          }}>
-            {bestPerformer.isMultiple ? '👑' : '🏆'}
-          </div>
-          <div style={{ fontSize: "24px", fontWeight: "bold", marginBottom: "10px" }}>
-            {bestPerformer.isMultiple ? "Top Performers" : "Best Performer"} ({selectedPeriod})
-            <div style={{ fontSize: "16px", marginTop: "5px", opacity: 0.9 }}>
-              Based on Performance based on assigned ዝርዝር ተግባራት
-              {bestPerformer.isMultiple && ` (${bestPerformer.count} users tied for first place)`}
-            </div>
-          </div>
-          <div style={{ 
-            fontSize: bestPerformer.isMultiple ? "26px" : "32px", 
-            fontWeight: "bold", 
-            marginBottom: "15px",
-            lineHeight: "1.3",
-            wordBreak: "break-word"
-          }}>
-            {bestPerformer.name}
-          </div>
-          <div style={{
-            display: 'flex',
-            justifyContent: 'center',
-            gap: '40px',
-            flexWrap: 'wrap'
-          }}>
-            <div>
-              <div style={{ fontSize: "14px", opacity: 0.9 }}>ዝርዝር ተግባራት Performance</div>
-              <div style={{ fontSize: "28px", fontWeight: "bold" }}>{(bestPerformer.performance || 0).toFixed(0)}%</div>
-            </div>
-            <div>
-              <div style={{ fontSize: "14px", opacity: 0.9 }}>Assigned ዝርዝር ተግባራት</div>
-              <div style={{ fontSize: "28px", fontWeight: "bold" }}>
-                {(bestPerformer.assignedOneLevelIssuesCount || 0)}
-              </div>
-            </div>
-            <div>
-              <div style={{ fontSize: "14px", opacity: 0.9 }}>Weight Calculation</div>
-              <div style={{ fontSize: "28px", fontWeight: "bold" }}>
-                {(bestPerformer.totalActualWeight || 0).toFixed(1)}/{(bestPerformer.totalIssueWeight || 0).toFixed(1)}
-              </div>
-            </div>
-          </div>
-          <div style={{ marginTop: '15px', fontSize: '12px', opacity: 0.8 }}>
-            <div>Period: {selectedPeriod}</div>
-            <div style={{ marginTop: '5px' }}>
-              Formula: (∑Actual Weight × 100) ÷ ∑Issue Weight
-            </div>
-            {selectedPeriod.includes("ሩብዓመት") && (
-              <div style={{ marginTop: '3px', fontSize: '11px' }}>
-                Sub-issues use their OWN quarter values for progress mapping
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+      
 
       {/* Performance Tab */}
       {activeTab === 'performance' && !selectedUser && (
         <>
+          {/* Period Filter for Performance Tab */}
           <div style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            marginBottom: '20px',
-            flexWrap: 'wrap',
-            gap: '15px'
+            marginBottom: '30px',
+            padding: '15px',
+            backgroundColor: '#f8f9fa',
+            borderRadius: '8px',
+            border: '1px solid #dee2e6'
           }}>
-            <h2 style={{ margin: 0 }}>Team Performance Metrics ({selectedPeriod})</h2>
-            <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
-              <select
-                value={selectedPeriod}
-                onChange={(e) => handlePeriodChange(e.target.value)}
-                style={{
-                  padding: '8px',
-                  borderRadius: '4px',
-                  border: '1px solid #ddd',
-                  backgroundColor: '#f8f9fa',
-                  fontWeight: 'bold',
-                  minWidth: '150px'
-                }}
-              >
-                {periodOptions.map(period => (
-                  <option key={period} value={period}>{period}</option>
-                ))}
-              </select>
-              
-              <select
-                value={filterStatus}
-                onChange={(e) => setFilterStatus(e.target.value)}
-                style={{
-                  padding: '8px',
-                  borderRadius: '4px',
-                  border: '1px solid #ddd',
-                  minWidth: '150px'
-                }}
-              >
-                <option value="all">All Statuses</option>
-                {statuses.map(status => (
-                  <option key={status.id} value={status.id}>
-                    {status.name}
-                  </option>
-                ))}
-              </select>
-              
-              <div style={{ color: '#666', fontSize: '14px' }}>
-                Showing {currentPerformanceData.length} team members • 
-                {selectedPeriod === "Yearly" && " Issues with valid የዓመቱ እቅድ"}
-                {selectedPeriod === "6 Months" && " Issues with valid Q1 or Q2 values"}
-                {selectedPeriod === "9 Months" && " Issues with valid Q1, Q2, or Q3 values"}
-                {selectedPeriod.includes("ሩብዓመት") && ` Issues with valid ${selectedPeriod} values`}
-              </div>
-            </div>
-          </div>
-          
-          {/* DUAL CHART LAYOUT */}
-          <div style={{
-            display: 'flex',
-            flexWrap: 'wrap',
-            gap: '20px',
-            marginBottom: '40px'
-          }}>
-            <div style={{ flex: '1 1 60%', minWidth: '300px', height: '450px' }}>
-              <div style={{ 
-                backgroundColor: '#fff', 
-                padding: '15px', 
-                borderRadius: '8px',
-                boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-                height: '100%'
-              }}>
-                <h3 style={{ margin: '0 0 15px 0', fontSize: '16px', color: '#333' }}>
-                  Performance based on assigned የግል እቅድ
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: '15px'
+            }}>
+              <div>
+                <h3 style={{ margin: '0 0 10px 0', fontSize: '16px', color: '#333' }}>
+                  Team Members Performance ({selectedPeriod})
                 </h3>
-                {currentPerformanceData.length > 0 ? (
-                  <ResponsiveContainer width="100%" height="85%">
-                    <BarChart data={currentPerformanceData} margin={{ top: 20, bottom: 80 }}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis 
-                        dataKey="name" 
-                        tick={{ fontSize: 12 }}
-                        interval={0}
-                        angle={-30}
-                        textAnchor="end"
-                        height={80}
-                      />
-                      <YAxis 
-                        domain={[0, 100]} 
-                        unit="%" 
-                        tickFormatter={(value) => `${value}%`}
-                      />
-                      <Tooltip content={<PerformanceTooltip />} />
-                      <Legend />
-                      <Bar
-                        dataKey="performance"
-                        name="Performance %"
-                        cursor="pointer"
-                        onClick={(data) => handleUserSelect(data)}
-                      >
-                        {currentPerformanceData.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={entry.color || "#f44336"} />
-                        ))}
-                        <LabelList 
-                          dataKey="performance" 
-                          position="top" 
-                          formatter={(val) => `${(val || 0).toFixed(0)}%`}
-                          style={{ fontSize: '12px' }}
-                        />
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <div style={{
-                    display: 'flex',
-                    justifyContent: 'center',
-                    alignItems: 'center',
-                    height: '100%',
-                    color: '#666',
-                    fontSize: '16px'
-                  }}>
-                    No performance data available for {selectedPeriod}
-                  </div>
-                )}
+               
+              </div>
+              
+              <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+                <select
+                  value={selectedPeriod}
+                  onChange={(e) => handlePeriodChange(e.target.value)}
+                  style={{
+                    padding: '8px 12px',
+                    borderRadius: '4px',
+                    border: '1px solid #ddd',
+                    backgroundColor: '#fff',
+                    fontWeight: 'bold',
+                    minWidth: '150px',
+                    fontSize: '14px'
+                  }}
+                >
+                  {periodOptions.map(period => (
+                    <option key={period} value={period}>{period}</option>
+                  ))}
+                </select>
+                
+                
               </div>
             </div>
             
-            <div style={{ flex: '1 1 35%', minWidth: '300px', height: '450px' }}>
-              <div style={{ 
-                backgroundColor: '#fff', 
-                padding: '15px', 
-                borderRadius: '8px',
-                boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-                height: '100%'
+           
+          </div>
+
+          {/* Best Performers & Team Average Cards */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
+            gap: '15px',
+            marginBottom: '30px'
+          }}>
+            {/* Best Performers Card */}
+            <div style={{
+              padding: '20px',
+              backgroundColor: '#fff',
+              borderRadius: '12px',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+              borderTop: '4px solid #ff9800',
+              position: 'relative',
+              overflow: 'hidden'
+            }}>
+              <div style={{
+                position: 'absolute',
+                top: '10px',
+                right: '10px',
+                backgroundColor: '#ff9800',
+                color: 'white',
+                padding: '4px 12px',
+                borderRadius: '20px',
+                fontSize: '12px',
+                fontWeight: 'bold'
               }}>
-                <h3 style={{ margin: '0 0 15px 0', fontSize: '16px', color: '#333' }}>
-                  Performance based on assigned ዝርዝር ተግባራት
-                </h3>
-                {currentDetailedTasksPerformanceData.length > 0 ? (
-                  <ResponsiveContainer width="100%" height="85%">
-                    <BarChart 
-                      data={currentDetailedTasksPerformanceData} 
-                      margin={{ top: 20, right: 30, left: 0, bottom: 80 }}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis 
-                        dataKey="name" 
-                        tick={{ fontSize: 11 }}
-                        interval={0}
-                        angle={-45}
-                        textAnchor="end"
-                        height={80}
-                      />
-                      <YAxis 
-                        domain={[0, 100]} 
-                        unit="%" 
-                        tickFormatter={(value) => `${value}%`}
-                        width={40}
-                      />
-                      <Tooltip content={<DetailedTasksPerformanceTooltip />} />
-                      <Legend />
-                      <Bar
-                        dataKey="performance"
-                        name="ዝርዝር ተግባራት Performance %"
-                        cursor="pointer"
-                        onClick={(data) => handleUserSelect(data)}
-                      >
-                        {currentDetailedTasksPerformanceData.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={entry.color || "#f44336"} />
-                        ))}
-                        <LabelList 
-                          dataKey="performance" 
-                          position="top" 
-                          formatter={(val) => `${(val || 0).toFixed(0)}%`}
-                          style={{ fontSize: '10px' }}
-                        />
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <div style={{
-                    display: 'flex',
-                    justifyContent: 'center',
-                    alignItems: 'center',
-                    height: '100%',
-                    color: '#666',
-                    fontSize: '16px',
-                    flexDirection: 'column'
+                🏆 Top Performers
+              </div>
+              
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '15px',
+                marginBottom: '15px'
+              }}>
+                <div style={{
+                  width: '60px',
+                  height: '60px',
+                  backgroundColor: '#fff3e0',
+                  borderRadius: '50%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#ff9800',
+                  fontSize: '24px',
+                  fontWeight: 'bold'
+                }}>
+                  🥇
+                </div>
+                <div>
+                  <div style={{ fontSize: '14px', color: '#666', marginBottom: '5px' }}>
+                    Best Performers ({selectedPeriod})
+                  </div>
+                  <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#333' }}>
+                    {bestPerformersData.bestPerformers.length > 0 ? 
+                      bestPerformersData.bestPerformers.map(user => truncateText(user.name, 15)).join(', ') : 
+                      'No performers'
+                    }
+                  </div>
+                </div>
+              </div>
+              
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginTop: '15px',
+                paddingTop: '15px',
+                borderTop: '1px solid #eee'
+              }}>
+                <div>
+                  <div style={{ fontSize: '12px', color: '#666' }}>Performance</div>
+                  <div style={{ 
+                    fontSize: '24px', 
+                    fontWeight: 'bold', 
+                    color: getProgressColor(bestPerformersData.maxPerformance)
                   }}>
-                    <div style={{ fontSize: '48px', marginBottom: '10px', opacity: 0.5 }}>
-                      📊
+                    {bestPerformersData.maxPerformance}%
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontSize: '12px', color: '#666', textAlign: 'right' }}>Count</div>
+                  <div style={{ 
+                    fontSize: '24px', 
+                    fontWeight: 'bold', 
+                    color: '#333',
+                    textAlign: 'right'
+                  }}>
+                    {bestPerformersData.bestPerformers.length}
+                  </div>
+                </div>
+              </div>
+              
+              {bestPerformersData.bestPerformers.length > 0 && (
+                <div style={{
+                  marginTop: '15px',
+                  padding: '10px',
+                  backgroundColor: '#fff3e0',
+                  borderRadius: '8px',
+                  fontSize: '12px',
+                  color: '#666'
+                }}>
+                  <div style={{ fontWeight: 'bold', marginBottom: '5px', color: '#ff9800' }}>
+                    Performance Details:
+                  </div>
+                  {bestPerformersData.bestPerformers.map((user, index) => (
+                    <div key={user.id} style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      padding: '5px 0',
+                      borderBottom: index < bestPerformersData.bestPerformers.length - 1 ? '1px dashed #ffcc80' : 'none'
+                    }}>
+                      <span>{truncateText(user.name, 20)}</span>
+                      <span style={{ 
+                        fontWeight: 'bold',
+                        color: getProgressColor(user.performance)
+                      }}>
+                        {user.performance}%
+                      </span>
                     </div>
-                    <div>No ዝርዝር ተግባራት performance data</div>
-                    <div style={{ fontSize: '12px', color: '#888', marginTop: '5px' }}>
-                      (Calculating based on 1-level hierarchy issues)
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Team Performance Average Card */}
+            <div style={{
+              padding: '20px',
+              backgroundColor: '#fff',
+              borderRadius: '12px',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+              borderTop: '4px solid #4caf50',
+              position: 'relative',
+              overflow: 'hidden'
+            }}>
+              <div style={{
+                position: 'absolute',
+                top: '10px',
+                right: '10px',
+                backgroundColor: '#4caf50',
+                color: 'white',
+                padding: '4px 12px',
+                borderRadius: '20px',
+                fontSize: '12px',
+                fontWeight: 'bold'
+              }}>
+                📊 Team Stats
+              </div>
+              
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '15px',
+                marginBottom: '15px'
+              }}>
+                <div style={{
+                  width: '60px',
+                  height: '60px',
+                  backgroundColor: '#e8f5e9',
+                  borderRadius: '50%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#4caf50',
+                  fontSize: '24px',
+                  fontWeight: 'bold'
+                }}>
+                  👥
+                </div>
+                <div>
+                  <div style={{ fontSize: '14px', color: '#666', marginBottom: '5px' }}>
+                    Team Performance ({selectedPeriod})
+                  </div>
+                  <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#333' }}>
+                    Average Performance
+                  </div>
+                </div>
+              </div>
+              
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginTop: '15px',
+                paddingTop: '15px',
+                borderTop: '1px solid #eee'
+              }}>
+                <div>
+                  <div style={{ fontSize: '12px', color: '#666' }}>Team Average</div>
+                  <div style={{ 
+                    fontSize: '32px', 
+                    fontWeight: 'bold', 
+                    color: getProgressColor(bestPerformersData.teamAverage)
+                  }}>
+                    {bestPerformersData.teamAverage}%
+                  </div>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ fontSize: '12px', color: '#666' }}>Active Members</div>
+                  <div style={{ 
+                    fontSize: '24px', 
+                    fontWeight: 'bold', 
+                    color: '#1976d2'
+                  }}>
+                    {currentPerformanceData.filter(user => user.performance > 0).length}
+                  </div>
+                </div>
+              </div>
+              
+              <div style={{
+                marginTop: '15px',
+                padding: '10px',
+                backgroundColor: '#e8f5e9',
+                borderRadius: '8px',
+                fontSize: '12px',
+                color: '#666'
+              }}>
+                <div style={{ fontWeight: 'bold', marginBottom: '5px', color: '#2e7d32' }}>
+                  Performance Range:
+                </div>
+                <div style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center'
+                }}>
+                  <div>
+                    <div style={{ fontSize: '10px', color: '#666' }}>Best</div>
+                    <div style={{ fontWeight: 'bold', color: '#4caf50' }}>
+                      {bestPerformersData.maxPerformance}%
                     </div>
                   </div>
-                )}
+                  <div>
+                    <div style={{ fontSize: '10px', color: '#666' }}>Average</div>
+                    <div style={{ fontWeight: 'bold', color: '#1976d2' }}>
+                      {bestPerformersData.teamAverage}%
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '10px', color: '#666' }}>Lowest*</div>
+                    <div style={{ fontWeight: 'bold', color: '#ff5722' }}>
+                      {currentPerformanceData.filter(user => user.performance > 0).length > 0 ? 
+                        Math.min(...currentPerformanceData.filter(user => user.performance > 0).map(user => user.performance)) : 
+                        0
+                      }%
+                    </div>
+                  </div>
+                </div>
+                <div style={{ 
+                  fontSize: '10px', 
+                  color: '#888', 
+                  marginTop: '5px',
+                  fontStyle: 'italic'
+                }}>
+                  *Excludes members with 0% performance
+                </div>
               </div>
             </div>
           </div>
 
-          {/* UPDATED: Team Member Cards Grid - Now shows group users with performance data */}
+          {/* SEPARATE PERFORMANCE BAR CHART */}
+          <div style={{
+            marginBottom: '30px',
+            padding: '20px',
+            backgroundColor: 'white',
+            borderRadius: '8px',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+          }}>
+            <h3 style={{ margin: '0 0 15px 0', color: '#333' }}>
+              Team Performance Overview ({selectedPeriod})
+            </h3>
+            
+            <div style={{ width: "100%", height: "400px" }}>
+              <ResponsiveContainer width="100%" height="100%" minHeight={300}>
+                <BarChart 
+                  data={currentPerformanceData
+                    .sort((a, b) => (b.performance || 0) - (a.performance || 0))
+                    .map(user => ({
+                      name: truncateText(user.name, 15),
+                      performance: user.performance || 0,
+                      color: user.color || getProgressColor(user.performance || 0),
+                      completedIssues: user.completedIssues || 0,
+                      totalIssues: user.totalIssues || 0,
+                      rawPerformance: user.rawPerformance || 0,
+                      maxWeight: user.maxWeight || 0
+                    }))} 
+                  margin={{ top: 20, right: 30, left: 20, bottom: 60 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis
+                    dataKey="name"
+                    angle={-30}
+                    textAnchor="end"
+                    interval={0}
+                    tickFormatter={truncateText}
+                    height={60}
+                    tick={{ fontSize: 12 }}
+                  />
+                  <YAxis 
+                    domain={[0, 100]} 
+                    unit="%" 
+                    label={{ 
+                      value: 'Performance (%)', 
+                      angle: -90, 
+                      position: 'insideLeft',
+                      offset: -10,
+                      style: { textAnchor: 'middle', fontSize: 12 }
+                    }}
+                  />
+                  <Tooltip
+                    content={<PerformanceTooltip />}
+                  />
+                  <Legend />
+                  <Bar 
+                    dataKey="performance" 
+                    name="Calculated Performance"
+                    radius={[4, 4, 0, 0]}
+                  >
+                    {currentPerformanceData.map((user, index) => (
+                      <Cell 
+                        key={`cell-${index}`} 
+                        fill={user.color || getProgressColor(user.performance || 0)} 
+                      />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          {/* User Cards Section */}
           <div style={{
             marginBottom: '40px'
           }}>
-            <h3 style={{ marginBottom: '20px', color: '#333' }}>
-              Team Members Performance ({selectedPeriod})
-              <span style={{ fontSize: '14px', color: '#666', marginLeft: '10px', fontWeight: 'normal' }}>
-                Click on any card to view detailed information
-              </span>
-            </h3>
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginBottom: '15px'
+            }}>
+              
+              
+            </div>
             
             <div style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
-              gap: '20px'
+              gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))',
+              gap: '15px',
+              marginBottom: '30px'
             }}>
-              {groupUsers.map(user => {
-                // Find performance data for this user
-                const personalPlanData = currentPerformanceData.find(u => u.id === user.id);
-                const detailedTasksData = currentDetailedTasksPerformanceData.find(u => u.id === user.id);
-                
-                // Get combined performance (average of both metrics if both exist)
-                let combinedPerformance = 0;
-                let performanceCount = 0;
-                
-                if (personalPlanData && personalPlanData.performance > 0) {
-                  combinedPerformance += personalPlanData.performance;
-                  performanceCount++;
-                }
-                
-                if (detailedTasksData && detailedTasksData.performance > 0) {
-                  combinedPerformance += detailedTasksData.performance;
-                  performanceCount++;
-                }
-                
-                const avgPerformance = performanceCount > 0 ? Math.round(combinedPerformance / performanceCount) : 0;
-                const displayPerformance = performanceCount > 0 ? avgPerformance : (personalPlanData?.performance || 0);
-                const performanceColor = getProgressColor(displayPerformance);
+              {currentPerformanceData.map((user) => {
+                // Calculate period-specific weights using the FIXED function
+                const periodWeights = calculateWeightsForPeriod(user, issues, selectedPeriod, projectMembers);
+                const totalPeriodWeight = periodWeights.totalWeight;
                 
                 return (
                   <div
                     key={user.id}
                     onClick={() => handleUserSelect(user)}
                     style={{
-                      padding: '20px',
+                      padding: '15px',
                       backgroundColor: '#fff',
-                      borderRadius: '12px',
+                      borderRadius: '8px',
+                      boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+                      borderLeft: `4px solid ${user.color || "#f44336"}`,
                       cursor: 'pointer',
-                      transition: 'all 0.3s ease',
-                      border: '2px solid #e0e0e0',
-                      boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
-                      position: 'relative',
-                      overflow: 'hidden'
+                      transition: 'all 0.3s ease'
                     }}
                     onMouseEnter={(e) => {
-                      e.currentTarget.style.borderColor = '#1976d2';
-                      e.currentTarget.style.boxShadow = '0 8px 20px rgba(25, 118, 210, 0.2)';
                       e.currentTarget.style.transform = 'translateY(-4px)';
+                      e.currentTarget.style.boxShadow = '0 8px 20px rgba(0,0,0,0.15)';
                     }}
                     onMouseLeave={(e) => {
-                      e.currentTarget.style.borderColor = '#e0e0e0';
-                      e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.08)';
                       e.currentTarget.style.transform = 'translateY(0)';
+                      e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.1)';
                     }}
                   >
-                    {/* Performance badge */}
-                    <div style={{
-                      position: 'absolute',
-                      top: '15px',
-                      right: '15px',
-                      backgroundColor: performanceColor,
-                      color: 'white',
-                      padding: '6px 12px',
-                      borderRadius: '20px',
-                      fontWeight: 'bold',
-                      fontSize: '14px',
-                      minWidth: '60px',
-                      textAlign: 'center'
-                    }}>
-                      {displayPerformance}%
-                    </div>
-                    
-                    {/* User avatar/icon */}
-                    <div style={{
-                      width: '60px',
-                      height: '60px',
-                      backgroundColor: '#1976d2',
-                      borderRadius: '50%',
-                      display: 'flex',
+                    <div style={{ 
+                      display: 'flex', 
+                      justifyContent: 'space-between', 
                       alignItems: 'center',
-                      justifyContent: 'center',
-                      color: 'white',
-                      fontSize: '24px',
-                      fontWeight: 'bold',
-                      marginBottom: '15px'
+                      marginBottom: '10px'
                     }}>
-                      {user.name.charAt(0).toUpperCase()}
-                    </div>
-                    
-                    {/* User name */}
-                    <h3 style={{ 
-                      margin: '0 0 10px 0', 
-                      fontSize: '18px', 
-                      fontWeight: 'bold',
-                      color: '#333'
-                    }}>
-                      {user.name}
-                    </h3>
-                    
-                    {/* User login/id */}
-                    <div style={{
-                      fontSize: '13px',
-                      color: '#666',
-                      marginBottom: '20px'
-                    }}>
-                      <div>
-                        <strong>ID:</strong> {user.id}
+                      <div style={{ fontSize: '14px', fontWeight: 'bold' }}>
+                        {user.name}
                       </div>
-                      {user.login && (
-                        <div>
-                          <strong>Login:</strong> {user.login}
-                        </div>
-                      )}
-                    </div>
-                    
-                    {/* Performance metrics */}
-                    <div style={{
-                      display: 'grid',
-                      gridTemplateColumns: 'repeat(2, 1fr)',
-                      gap: '10px',
-                      marginTop: '15px'
-                    }}>
-                      {/* Personal Plan Performance */}
                       <div style={{
-                        padding: '10px',
-                        backgroundColor: '#f8f9fa',
-                        borderRadius: '8px',
-                        textAlign: 'center'
+                        backgroundColor: user.color || getProgressColor(user.performance || 0),
+                        color: 'white',
+                        padding: '2px 8px',
+                        borderRadius: '10px',
+                        fontSize: '12px',
+                        fontWeight: 'bold'
                       }}>
-                        <div style={{ fontSize: '11px', color: '#666', marginBottom: '5px' }}>
-                          የግል እቅድ
-                        </div>
-                        <div style={{ 
-                          fontSize: '18px', 
-                          fontWeight: 'bold',
-                          color: personalPlanData?.color || '#666'
-                        }}>
-                          {personalPlanData?.performance || 0}%
-                        </div>
-                        <div style={{ fontSize: '10px', color: '#888', marginTop: '3px' }}>
-                          {personalPlanData?.completedIssues || 0}/{personalPlanData?.totalIssues || 0} tasks
-                        </div>
-                      </div>
-                      
-                      {/* Detailed Tasks Performance */}
-                      <div style={{
-                        padding: '10px',
-                        backgroundColor: '#f8f9fa',
-                        borderRadius: '8px',
-                        textAlign: 'center'
-                      }}>
-                        <div style={{ fontSize: '11px', color: '#666', marginBottom: '5px' }}>
-                          ዝርዝር ተግባራት
-                        </div>
-                        <div style={{ 
-                          fontSize: '18px', 
-                          fontWeight: 'bold',
-                          color: detailedTasksData?.color || '#666'
-                        }}>
-                          {detailedTasksData?.performance || 0}%
-                        </div>
-                        <div style={{ fontSize: '10px', color: '#888', marginTop: '3px' }}>
-                          {detailedTasksData?.assignedOneLevelIssuesCount || 0} issues
-                        </div>
+                        {user.performance || 0}%
                       </div>
                     </div>
                     
-                    {/* Click indicator */}
-                    <div style={{
-                      marginTop: '15px',
-                      padding: '8px',
-                      backgroundColor: '#e3f2fd',
-                      borderRadius: '6px',
-                      textAlign: 'center',
-                      fontSize: '12px',
-                      color: '#1976d2',
-                      fontWeight: 'bold',
-                      border: '1px dashed #1976d2'
-                    }}>
-                      👆 Click to view detailed information
-                    </div>
+                    
+                    
+                    
+                    
+                  
                   </div>
                 );
               })}
             </div>
+            
+            
           </div>
         </>
       )}
@@ -2185,7 +2291,6 @@ function TeamLeaderDashboard() {
             <button
               onClick={() => {
                 setSelectedUser(null);
-                setSelectedUserDetailedData(null);
               }}
               style={{
                 padding: '8px 15px',
@@ -2201,176 +2306,220 @@ function TeamLeaderDashboard() {
             >
               ← Back to Team
             </button>
-            <h2 style={{ margin: 0 }}>{selectedUser.name}'s Performance Details ({selectedPeriod})</h2>
+            <h2 style={{ margin: 0 }}>{selectedUser.name}'s  Details </h2>
             
-            <div style={{ marginLeft: 'auto', display: 'flex', gap: '15px' }}>
-              <div style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: '12px', color: '#666' }}>የግል እቅድ Performance</div>
-                <div style={{ fontSize: '24px', fontWeight: 'bold', color: selectedUser.color || "#f44336" }}>
-                  {(selectedUser.performance || 0).toFixed(0)}%
-                </div>
+            <div style={{ marginLeft: 'auto', display: 'flex', gap: '15px', alignItems: 'center', flexWrap: 'wrap' }}>
+              <div style={{
+                display: 'flex',
+                gap: '10px',
+                alignItems: 'center'
+              }}>
+                <select
+                  value={selectedPeriod}
+                  onChange={(e) => handlePeriodChange(e.target.value)}
+                  style={{
+                    padding: '8px 12px',
+                    borderRadius: '4px',
+                    border: '1px solid #ddd',
+                    backgroundColor: '#fff',
+                    fontWeight: 'bold',
+                    minWidth: '150px',
+                    fontSize: '14px'
+                  }}
+                >
+                  {periodOptions.map(period => (
+                    <option key={period} value={period}>{period}</option>
+                  ))}
+                </select>
               </div>
-              {selectedUserDetailedData && (
-                <div style={{ textAlign: 'center' }}>
-                  <div style={{ fontSize: '12px', color: '#666' }}>ዝርዝር ተግባራት Performance</div>
-                  <div style={{ fontSize: '24px', fontWeight: 'bold', color: selectedUserDetailedData.color || "#1976d2" }}>
-                    {(selectedUserDetailedData.performance || 0).toFixed(0)}%
-                  </div>
-                </div>
-              )}
-              <div style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: '12px', color: '#666' }}>Completion Rate</div>
-                <div style={{ fontSize: '24px', fontWeight: 'bold' }}>
-                  {(selectedUser.completedIssues || 0)}/{(selectedUser.totalIssues || 0)}
-                </div>
-              </div>
+              <button
+                onClick={handleRefresh}
+                style={{
+                  padding: '8px 16px',
+                  backgroundColor: '#f5f5f5',
+                  border: '1px solid #ddd',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '5px'
+                }}
+              >
+                🔄 Refresh
+              </button>
             </div>
           </div>
 
-          {/* Combined Performance Overview */}
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
-            gap: '20px',
-            marginBottom: '30px'
-          }}>
-            {/* Personal Plan Performance Card */}
+          {/* Weight Summary Card - Now uses the same calculation as chart */}
+          {calculateTotalWeightIncludingMainIssues.totalTasks > 0 && (
             <div style={{
-              padding: '20px',
-              backgroundColor: '#fff',
-              borderRadius: '8px',
-              boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-              borderLeft: `4px solid ${selectedUser.color || "#f44336"}`
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '30px',
+              marginBottom: '30px'
             }}>
-              <h3 style={{ marginBottom: '15px', color: '#333' }}>
-                የግል እቅድ Performance
-              </h3>
-              <div style={{ marginBottom: '15px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px' }}>
-                  <span style={{ fontSize: '14px', color: '#666' }}>Overall Performance:</span>
-                  <span style={{ fontSize: '16px', fontWeight: 'bold', color: selectedUser.color }}>
-                    {selectedUser.performance}%
-                  </span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px' }}>
-                  <span style={{ fontSize: '14px', color: '#666' }}>Completed Tasks:</span>
-                  <span style={{ fontSize: '16px', fontWeight: 'bold' }}>
-                    {selectedUser.completedIssues}/{selectedUser.totalIssues}
-                  </span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px' }}>
-                  <span style={{ fontSize: '14px', color: '#666' }}>Weight Progress:</span>
-                  <span style={{ fontSize: '16px', fontWeight: 'bold' }}>
-                    {selectedUser.rawPerformance?.toFixed(1) || 0}/{selectedUser.maxWeight?.toFixed(1) || 0}
-                  </span>
-                </div>
-              </div>
-              
-              {/* Progress Bar */}
-              <div style={{ marginTop: '10px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px' }}>
-                  <span style={{ fontSize: '12px', color: '#666' }}>Progress</span>
-                  <span style={{ fontSize: '12px', fontWeight: 'bold', color: selectedUser.color }}>
-                    {selectedUser.performance}%
-                  </span>
-                </div>
-                <div style={{
-                  width: "100%",
-                  backgroundColor: "#e0e0e0",
-                  borderRadius: "8px",
-                  overflow: "hidden",
-                  height: "10px",
-                }}>
-                  <div
-                    style={{
-                      width: `${selectedUser.performance || 0}%`,
-                      backgroundColor: selectedUser.color,
-                      height: "100%",
-                    }}
-                  ></div>
-                </div>
-              </div>
-            </div>
-
-            {/* Detailed Tasks Performance Card */}
-            {selectedUserDetailedData && (
               <div style={{
                 padding: '20px',
-                backgroundColor: '#fff',
-                borderRadius: '8px',
-                boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-                borderLeft: `4px solid ${selectedUserDetailedData.color || "#1976d2"}`
+                backgroundColor: '#fff3e0',
+                borderRadius: '12px',
+                textAlign: 'center'
               }}>
-                <h3 style={{ marginBottom: '15px', color: '#333' }}>
-                  ዝርዝር ተግባራት Performance
-                </h3>
-                <div style={{ marginBottom: '15px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px' }}>
-                    <span style={{ fontSize: '14px', color: '#666' }}>Overall Performance:</span>
-                    <span style={{ fontSize: '16px', fontWeight: 'bold', color: selectedUserDetailedData.color }}>
-                      {selectedUserDetailedData.performance}%
-                    </span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px' }}>
-                    <span style={{ fontSize: '14px', color: '#666' }}>Assigned Issues:</span>
-                    <span style={{ fontSize: '16px', fontWeight: 'bold' }}>
-                      {selectedUserDetailedData.assignedOneLevelIssuesCount}
-                    </span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px' }}>
-                    <span style={{ fontSize: '14px', color: '#666' }}>Weight Calculation:</span>
-                    <span style={{ fontSize: '16px', fontWeight: 'bold' }}>
-                      {selectedUserDetailedData.totalActualWeight?.toFixed(1) || 0}/{selectedUserDetailedData.totalIssueWeight?.toFixed(1) || 0}
-                    </span>
+                <div style={{
+                  display: 'flex',
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  gap: '15px',
+                  marginBottom: '15px'
+                }}>
+                  <div>
+                    <h3 style={{ margin: 0, color: '#333', fontSize: '18px' }}>
+                      Total Weight Summary ({selectedPeriod})
+                    </h3>
                   </div>
                 </div>
                 
-                {/* Progress Bar */}
-                <div style={{ marginTop: '10px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px' }}>
-                    <span style={{ fontSize: '12px', color: '#666' }}>Progress</span>
-                    <span style={{ fontSize: '12px', fontWeight: 'bold', color: selectedUserDetailedData.color }}>
-                      {selectedUserDetailedData.performance}%
-                    </span>
-                  </div>
+                <div style={{
+                  display: 'flex',
+                  gap: '15px',
+                  marginTop: '20px',
+                  justifyContent: 'center'
+                }}>
                   <div style={{
-                    width: "100%",
-                    backgroundColor: "#e0e0e0",
-                    borderRadius: "8px",
-                    overflow: "hidden",
-                    height: "10px",
+                    padding: '15px',
+                    flex: 1,
+                    backgroundColor: 'white',
+                    borderRadius: '8px',
+                    boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
                   }}>
-                    <div
-                      style={{
-                        width: `${selectedUserDetailedData.performance || 0}%`,
-                        backgroundColor: selectedUserDetailedData.color,
-                        height: "100%",
-                      }}
-                    ></div>
+                    <div style={{ fontSize: '12px', color: '#ff9800', marginBottom: '5px', fontWeight: 'bold' }}>
+                      Target Weight
+                    </div>
+                    <div style={{ 
+                      fontSize: '28px', 
+                      fontWeight: 'bold', 
+                      color: '#ff9800',
+                      display: 'flex',
+                      alignItems: 'baseline',
+                      justifyContent: 'center',
+                      gap: '5px'
+                    }}>
+                      {calculateTotalWeightIncludingMainIssues.totalWeight.toFixed(2)}
+                    </div>
+                  </div>
+                  
+                  <div style={{
+                    padding: '15px',
+                    flex: 1,
+                    backgroundColor: 'white',
+                    borderRadius: '8px',
+                    boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+                  }}>
+                    <div style={{ fontSize: '12px', color: '#4caf50', marginBottom: '5px', fontWeight: 'bold' }}>
+                      Contributed Weight
+                    </div>
+                    <div style={{ 
+                      fontSize: '28px', 
+                      fontWeight: 'bold', 
+                      color: '#4caf50',
+                      display: 'flex',
+                      alignItems: 'baseline',
+                      justifyContent: 'center',
+                      gap: '5px'
+                    }}>
+                      {calculateTotalWeightIncludingMainIssues.actualWeight.toFixed(2)}
+                    </div>
                   </div>
                 </div>
               </div>
-            )}
-          </div>
+              
+              {/* Performance Card - Now matches chart performance */}
+              <div style={{
+                padding: '20px',
+                backgroundColor: '#e8f5e9',
+                borderRadius: '12px',
+                textAlign: 'center'
+              }}>
+                <div style={{
+                  display: 'flex',
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  gap: '15px',
+                  marginBottom: '15px'
+                }}>
+                  <div>
+                    <h3 style={{ margin: 0, color: '#333', fontSize: '18px' }}>
+                      Performance Summary ({selectedPeriod})
+                    </h3>
+                  </div>
+                </div>
+                
+                <div style={{
+                  display: 'flex',
+                  gap: '15px',
+                  marginTop: '20px',
+                  justifyContent: 'center'
+                }}>
+                
+                  
+                  <div style={{
+                    padding: '15px',
+                    flex: 1,
+                    backgroundColor: 'white',
+                    borderRadius: '8px',
+                    boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+                  }}>
+                    <div style={{ fontSize: '12px', color: '#2e7d32', marginBottom: '5px', fontWeight: 'bold' }}>
+                      Calculated Performance
+                    </div>
+                    <div style={{ 
+                      fontSize: '32px', 
+                      fontWeight: 'bold', 
+                      color: getProgressColor(calculatePerformanceFromWeights),
+                      display: 'flex',
+                      alignItems: 'baseline',
+                      justifyContent: 'center',
+                      gap: '5px'
+                    }}>
+                      {calculatePerformanceFromWeights.toFixed(1)}%
+                    </div>
+                    
+                    {/* Debug info - can be removed in production */}
+                    <div style={{ fontSize: '10px', color: '#666', marginTop: '5px' }}>
+                      (Same calculation as chart)
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
 
-          {/* የግል እቅድ Progress Chart */}
-          {selectedUserIssues.length > 0 && (
+          {/* የግል እቅድ Progress Chart - FILTERED BY PERIOD */}
+          {getAllAssignedIssuesForUser.length > 0 && (
             <div style={{ marginBottom: '40px' }}>
-              <h3 style={{ marginBottom: '20px', color: '#333' }}>
-                የግል እቅድ Progress ({selectedPeriod})
-                <span style={{ fontSize: '14px', color: '#666', marginLeft: '10px', fontWeight: 'normal' }}>
-                  {selectedUserIssues.length} የግል እቅድ
-                </span>
-              </h3>
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: '20px'
+              }}>
+                <h3 style={{ margin: 0, color: '#333' }}>
+                  Assigned Tasks Progress ({selectedPeriod})
+                  
+                </h3>
+                
+              </div>
               <div style={{ width: "100%", height: "400px" }}>
                 <ResponsiveContainer width="100%" height="100%" minHeight={300}>
                   <BarChart 
-                    data={selectedUserIssues.map(issue => ({
-                      id: issue.id,
-                      name: truncateText(issue.subject, 15),
-                      done_ratio: mapProgress(issue.done_ratio || 0, selectedPeriod, issue),
-                      color: getProgressColor(mapProgress(issue.done_ratio || 0, selectedPeriod, issue))
-                    }))} 
+                    data={getAllAssignedIssuesForUser
+                      .filter(issue => hasValidPeriodValue(issue, selectedPeriod))
+                      .map(issue => ({
+                        id: issue.id,
+                        name: truncateText(issue.subject, 15),
+                        done_ratio: mapProgress(issue.done_ratio || 0, selectedPeriod, issue),
+                        color: getProgressColor(mapProgress(issue.done_ratio || 0, selectedPeriod, issue)),
+                        isMainIssue: !issue.parent
+                      }))} 
                     margin={{ top: 20, bottom: 80 }}
                   >
                     <CartesianGrid strokeDasharray="3 3" />
@@ -2384,11 +2533,19 @@ function TeamLeaderDashboard() {
                     />
                     <YAxis domain={[0, 100]} unit="%" />
                     <Tooltip
-                      formatter={(value) => [`${(value || 0).toFixed(0)}%`, 'Progress']}
+                      formatter={(value, name, props) => {
+                        const issue = getAllAssignedIssuesForUser.find(i => i.id === props.payload.id);
+                        return [
+                          `${(value || 0).toFixed(0)}%`, 
+                          issue?.parent ? 'የግል እቅድ Progress' : 'ዝርዝር ተግባር Progress'
+                        ];
+                      }}
                       labelFormatter={(label) => truncateText(label, 50)}
                     />
                     <Bar dataKey="done_ratio" name="Progress %">
-                      {selectedUserIssues.map((entry, index) => (
+                      {getAllAssignedIssuesForUser
+                        .filter(issue => hasValidPeriodValue(issue, selectedPeriod))
+                        .map((entry, index) => (
                         <Cell 
                           key={`cell-${index}`} 
                           fill={getProgressColor(mapProgress(entry.done_ratio || 0, selectedPeriod, entry))} 
@@ -2409,9 +2566,20 @@ function TeamLeaderDashboard() {
 
           {/* Details Table */}
           <div style={{ marginTop: '40px' }}>
-            <h3 style={{ marginBottom: '20px', color: '#333' }}>
-              Performance Details Table ({selectedPeriod})
-            </h3>
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginBottom: '20px'
+            }}>
+              <h3 style={{ margin: 0, color: '#333' }}>
+                All Assigned Tasks Details ({selectedPeriod})
+                <span style={{ fontSize: '14px', color: '#666', marginLeft: '10px' }}>
+                  (Includes የግል እቅድ + ዝርዝር ተግባራት without sub-issues)
+                </span>
+              </h3>
+              
+            </div>
             
             {selectedUserTableData.length === 0 ? (
               <div style={{
@@ -2425,6 +2593,9 @@ function TeamLeaderDashboard() {
                 <p style={{ fontSize: '16px', marginBottom: '10px' }}>
                   No performance data available for {selectedPeriod}
                 </p>
+                <p style={{ fontSize: '14px', color: '#888' }}>
+                  This user doesn't have any tasks with valid target values for the selected period.
+                </p>
               </div>
             ) : (
               <div style={{
@@ -2436,15 +2607,16 @@ function TeamLeaderDashboard() {
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
                     <tr style={{ backgroundColor: '#f8f9fa' }}>
-                      <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #dee2e6', fontWeight: 'bold' }}>Issue Subject</th>
+                      <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #dee2e6', fontWeight: 'bold' }}>Task Type</th>
+                      <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #dee2e6', fontWeight: 'bold' }}>Subject</th>
                       <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #dee2e6', fontWeight: 'bold' }}>መለኪያ</th>
                       <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #dee2e6', fontWeight: 'bold' }}>
                         {selectedPeriod === "Yearly" ? "የዓመቱ እቅድ" : selectedPeriod} Target
                       </th>
-                      <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #dee2e6', fontWeight: 'bold' }}>Achievement (%)</th>
-                      <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #dee2e6', fontWeight: 'bold' }}>Actual Value</th>
-                      <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #dee2e6', fontWeight: 'bold' }}>Status</th>
-                      <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #dee2e6', fontWeight: 'bold' }}>Project</th>
+                      <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #dee2e6', fontWeight: 'bold' }}>Achievement</th>
+                      <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #dee2e6', fontWeight: 'bold' }}>Progress (%)</th>
+                      <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #dee2e6', fontWeight: 'bold' }}>Weight</th>
+                      <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #dee2e6', fontWeight: 'bold' }}>Actual Weight</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -2453,6 +2625,19 @@ function TeamLeaderDashboard() {
                         borderBottom: '1px solid #dee2e6',
                         backgroundColor: index % 2 === 0 ? '#fff' : '#f8f9fa'
                       }}>
+                        <td style={{ padding: '12px' }}>
+                          <div style={{
+                            display: 'inline-block',
+                            backgroundColor: row.isMainIssue ? '#1976d2' : '#4caf50',
+                            color: 'white',
+                            padding: '4px 8px',
+                            borderRadius: '4px',
+                            fontSize: '11px',
+                            fontWeight: 'bold'
+                          }}>
+                            {row.isMainIssue ? 'ዝርዝር ተግባር' : 'የግል እቅድ'}
+                          </div>
+                        </td>
                         <td style={{ padding: '12px', maxWidth: '250px', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                           {truncateText(row.subject, 40)}
                         </td>
@@ -2460,10 +2645,13 @@ function TeamLeaderDashboard() {
                         <td style={{ padding: '12px', fontWeight: 'bold' }}>
                           {row.targetValue}
                         </td>
+                        <td style={{ padding: '12px', fontWeight: 'bold', color: '#2e7d32' }}>
+                          {row.achievement.toFixed(2)}
+                        </td>
                         <td style={{ padding: '12px' }}>
                           <div style={{ 
                             display: 'inline-block',
-                            backgroundColor: getProgressColor(row.achievement),
+                            backgroundColor: getProgressColor(row.progress),
                             color: 'white',
                             padding: '4px 8px',
                             borderRadius: '4px',
@@ -2471,16 +2659,34 @@ function TeamLeaderDashboard() {
                             minWidth: '60px',
                             textAlign: 'center'
                           }}>
-                            {row.achievement}%
+                            {row.progress.toFixed(0)}%
                           </div>
                         </td>
-                        <td style={{ padding: '12px', fontWeight: 'bold', color: '#2e7d32' }}>
-                          {row.actual.toFixed(2)}
+                        <td style={{ padding: '12px', fontWeight: 'bold', color: '#1976d2' }}>
+                          {row.weight}
                         </td>
-                        <td style={{ padding: '12px' }}>{row.status}</td>
-                        <td style={{ padding: '12px' }}>{truncateText(row.project, 20)}</td>
+                        <td style={{ padding: '12px', fontWeight: 'bold', color: '#4caf50' }}>
+                          {row.actualWeight.toFixed(2)}
+                        </td>
                       </tr>
                     ))}
+                    {/* Total Row */}
+                    {selectedUserTableData.length > 0 && (
+                      <tr style={{ 
+                        backgroundColor: '#e8f5e9',
+                        borderTop: '2px solid #2e7d32'
+                      }}>
+                        <td style={{ padding: '12px', fontWeight: 'bold' }} colSpan="6">
+                          Total
+                        </td>
+                        <td style={{ padding: '12px', fontWeight: 'bold', color: '#1976d2' }}>
+                          {selectedUserTableData.reduce((sum, row) => sum + row.weight, 0).toFixed(2)}
+                        </td>
+                        <td style={{ padding: '12px', fontWeight: 'bold', color: '#2e7d32' }}>
+                          {selectedUserTableData.reduce((sum, row) => sum + row.actualWeight, 0).toFixed(2)}
+                        </td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -2498,11 +2704,10 @@ function TeamLeaderDashboard() {
             alignItems: 'center',
             marginBottom: '20px'
           }}>
-            <h2 style={{ margin: 0 }}>ዝርዝር ተግባራት Dashboard</h2>
+            
             <div style={{ color: '#666', fontSize: '14px' }}>
               Showing {filteredIssues.length} ዝርዝር ተግባራት
-              <br />
-              <small>(All issues - no period filtering applied)</small>
+              
             </div>
           </div>
 
@@ -2718,23 +2923,7 @@ function TeamLeaderDashboard() {
                 ))}
               </select>
               
-              <select
-                value={filterStatus}
-                onChange={(e) => setFilterStatus(e.target.value)}
-                style={{
-                  padding: '8px',
-                  borderRadius: '4px',
-                  border: '1px solid #ddd',
-                  minWidth: '150px'
-                }}
-              >
-                <option value="all">All Statuses</option>
-                {statuses.map(status => (
-                  <option key={status.id} value={status.id}>
-                    {status.name}
-                  </option>
-                ))}
-              </select>
+              
             </div>
           </div>
           
@@ -2931,8 +3120,8 @@ function TeamLeaderDashboard() {
                         <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #dee2e6', fontWeight: 'bold' }}>
                           {selectedPeriod === "Yearly" ? "የዓመቱ እቅድ" : selectedPeriod} Target
                         </th>
-                        <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #dee2e6', fontWeight: 'bold' }}>Achievement (%)</th>
-                        <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #dee2e6', fontWeight: 'bold' }}>Actual Value</th>
+                        <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #dee2e6', fontWeight: 'bold' }}>Achievement</th>
+                        <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #dee2e6', fontWeight: 'bold' }}>Progress (%)</th>
                         <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #dee2e6', fontWeight: 'bold' }}>Status</th>
                         <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #dee2e6', fontWeight: 'bold' }}>Assigned To</th>
                         <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #dee2e6', fontWeight: 'bold' }}>Project</th>
@@ -2951,10 +3140,13 @@ function TeamLeaderDashboard() {
                           <td style={{ padding: '12px', fontWeight: 'bold' }}>
                             {row.targetValue}
                           </td>
+                          <td style={{ padding: '12px', fontWeight: 'bold', color: '#2e7d32' }}>
+                            {row.achievement.toFixed(2)}
+                          </td>
                           <td style={{ padding: '12px' }}>
                             <div style={{ 
                               display: 'inline-block',
-                              backgroundColor: getProgressColor(row.achievement),
+                              backgroundColor: getProgressColor(row.progress),
                               color: 'white',
                               padding: '4px 8px',
                               borderRadius: '4px',
@@ -2962,17 +3154,14 @@ function TeamLeaderDashboard() {
                               minWidth: '60px',
                               textAlign: 'center'
                             }}>
-                              {row.achievement}%
+                              {row.progress.toFixed(0)}%
                             </div>
-                          </td>
-                          <td style={{ padding: '12px', fontWeight: 'bold', color: '#2e7d32' }}>
-                            {row.actual.toFixed(2)}
                           </td>
                           <td style={{ padding: '12px' }}>{row.status}</td>
                           <td style={{ padding: '12px' }}>{truncateText(row.assignedTo, 15)}</td>
                           <td style={{ padding: '12px' }}>{truncateText(row.project, 15)}</td>
                         </tr>
-                      ))}
+                    ))}
                     </tbody>
                   </table>
                 </div>
@@ -2992,11 +3181,7 @@ function TeamLeaderDashboard() {
             marginBottom: '20px'
           }}>
             <h2 style={{ margin: 0 }}>Personal Plan Track</h2>
-            <div style={{ color: '#666', fontSize: '14px' }}>
-              Track personal and group assignments for team members
-              <br />
-              <small>(All assigned issues shown - no period filtering, includes issues with empty or 0 period values)</small>
-            </div>
+            
           </div>
 
           {/* Group Member Selection */}
@@ -3038,6 +3223,7 @@ function TeamLeaderDashboard() {
                   <div style={{ fontSize: '16px', fontWeight: 'bold', marginBottom: '5px' }}>
                     {member.name}
                   </div>
+                 
                 </div>
               ))}
             </div>
@@ -3059,13 +3245,12 @@ function TeamLeaderDashboard() {
                   <h3 style={{ margin: 0 }}>
                     Assigned ዝርዝር ተግባራት ({groupMemberIssues.length})
                     <span style={{ fontSize: '14px', color: '#666', marginLeft: '10px', fontWeight: 'normal' }}>
-                      (All issues assigned to {selectedGroupMember.name} - no period filtering)
+                      (All issues assigned to {selectedGroupMember.name} )
                     </span>
                   </h3>
-                  <div style={{ fontSize: '14px', color: '#666', marginTop: '5px' }}>
-                    Showing all assigned issues including those with empty or 0 period values
-                  </div>
+                  
                 </div>
+                
               </div>
 
               {/* Personal Plan Categorization Section */}
@@ -3812,6 +3997,12 @@ function TeamLeaderDashboard() {
                         {personalPlanCategorizedIssues.withoutSubIssues.length}
                       </div>
                     </div>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ fontSize: '12px', color: '#666' }}>Performance ({selectedPeriod})</div>
+                      <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#1976d2' }}>
+                        {calculatePerformanceFromWeights.toFixed(1)}%
+                      </div>
+                    </div>
                   </div>
                 </div>
               )}
@@ -3854,38 +4045,7 @@ function TeamLeaderDashboard() {
         </div>
       )}
 
-      {/* Footer Stats */}
-      <div style={{
-        marginTop: '40px',
-        paddingTop: '20px',
-        borderTop: '1px solid #eee',
-        fontSize: '12px',
-        color: '#666',
-        textAlign: 'center'
-      }}>
-        <div style={{ display: 'flex', justifyContent: 'center', gap: '20px', flexWrap: 'wrap' }}>
-          <span>Total ዝርዝር ተግባራት: {issues.length}</span>
-          <span>•</span>
-          <span>Filtered ዝርዝር: {filteredIssues.length}</span>
-          <span>•</span>
-          <span>Team Members: {groupUsers.length}</span>
-          <span>•</span>
-          <span>Projects: {Object.keys(projectMembers).length}</span>
-          <span>•</span>
-          <span>Last Updated: {new Date().toLocaleTimeString()}</span>
-        </div>
-        <div style={{ marginTop: '10px', fontSize: '11px', color: '#888' }}>
-          {(activeTab === 'performance' || activeTab === 'analytics') && (
-            <>
-              *Best Performer based on Performance based on assigned ዝርዝር ተግባራት
-              {selectedPeriod.includes("ሩብዓመት") && " • Sub-issues use their OWN quarter values for progress mapping"}
-            </>
-          )}
-          {(activeTab === 'issues' || activeTab === 'personal-plan') && (
-            <>*Showing all ዝርዝር ተግባራት (no period filtering)</>
-          )}
-        </div>
-      </div>
+      
     </div>
   );
 }
