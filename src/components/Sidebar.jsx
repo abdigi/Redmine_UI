@@ -117,6 +117,8 @@ export default function Sidebar() {
     menuItems = [
       { name: "Dashboard", path: "/teamleader-dashboard", icon: Icons.Dashboard },
       { name: "Personal Plan", path: "/personal-plan-management", icon: Icons.Task },
+         
+      { name: "Progress", path: "/progress-page", icon: Icons.Progress },
       
     ];
   } else if (role === "Executives") {
@@ -160,7 +162,7 @@ export default function Sidebar() {
                 <Icons.User active={false} />
               </div>
               <div className="user-details">
-                <h3 className="user-name">{role}</h3>
+                
                 <p className="user-role">Ministry User</p>
               </div>
             </div>
